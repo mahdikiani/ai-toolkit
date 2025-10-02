@@ -84,7 +84,9 @@ class TranscribeRouter(AbstractTaskRouter):
         data: speechmatics.TranscribeWebhookSchema | TranscriptionWebhook | None = None,
         status: str | None = None,
     ) -> dict:
-        item: TranscribeTask = await self.get_item(uid, user_id=None)
+        item: TranscribeTask = await self.get_item(
+            uid, user_id=None, ignore_user_id=True
+        )
         if status == "error":
             background_tasks.add_task(services.process_error_webhook, item)
             return {"message": "Error"}

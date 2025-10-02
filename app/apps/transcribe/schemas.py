@@ -6,6 +6,8 @@ from fastapi_mongo_base.schemas import UserOwnedEntitySchema
 from fastapi_mongo_base.tasks import TaskMixin
 from pydantic import BaseModel
 
+from server.config import Settings
+
 
 class TranscribeTaskSchemaCreate(BaseModel):
     file_url: str
@@ -40,3 +42,11 @@ class TranscribeTaskSchema(
     def audio_duration(self) -> float:
         # todo: get audio duration from file
         return 5
+
+    @property
+    def item_url(self) -> str:
+        return "/".join([
+            f"https://{Settings.root_url}{Settings.base_path}",
+            "transcribes",
+            f"{self.uid}",
+        ])

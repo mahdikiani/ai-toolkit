@@ -10,15 +10,15 @@ RUN uv pip install --system --no-cache-dir --upgrade .
 
 FROM python:3.13-slim AS fast-server
 
-# Copy installed site-packages from build stage
-COPY --from=fast-uv /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
-
 WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y libmagic1 poppler-utils \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy installed site-packages from build stage
+COPY --from=fast-uv /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 
 RUN adduser --disabled-password --gecos '' user \
     && mkdir /app/logs \

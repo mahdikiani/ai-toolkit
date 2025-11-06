@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "aiofiles>=25.1.0",
     "beanie>=2.0.0",
-    "fastapi-mongo-base>=1.0.39",
+    "fastapi-mongo-base>=1.0.41",
     "httpx>=0.28.1",
     "mypy>=1.18.2",
     "openai>=2.6.1",

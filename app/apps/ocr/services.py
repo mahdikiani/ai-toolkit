@@ -41,9 +41,7 @@ async def process_ocr(task: OcrTask) -> OcrTask:
             task.user_id, len(pages), raise_exception=False
         )
         if quota < len(pages):
-            task.task_status = TaskStatusEnum.error
-            await task.save_report("insufficient_quota")
-            return task
+            return await save_error(task, "insufficient_quota")
 
         # Process pages with OCR
         text_pages = await process_pages_batch(pages, max_concurrent=10)
@@ -83,4 +81,5 @@ async def save_result(
     task.task_status = TaskStatusEnum.completed
     task.usage_amount = usage_amount
     task.usage_id = usage_id
-    return await task.save()
+    await task.save_report("Task processed successfully")
+    return task

@@ -11,6 +11,8 @@ class OcrTaskSchemaCreate(BaseModel):
     file_url: str
     user_id: str | None = None
     webhook_url: str | None = None
+    webhook_custom_headers: dict | None = None
+    meta_data: dict | None = None
 
     @property
     def is_pdf(self) -> bool:
@@ -36,3 +38,8 @@ class OcrTaskSchema(UserOwnedEntitySchema, TaskMixin, OcrTaskSchemaCreate):  # t
     result: str | None = None
     usage_amount: float | None = None
     usage_id: str | None = None
+
+    @property
+    def webhook_exclude_fields(self) -> set[str]:
+        return {}
+        return {"result"}

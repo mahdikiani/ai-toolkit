@@ -23,8 +23,8 @@ async def process_translate(task: TranslateTask) -> TranslateTask:
     await save_result(
         task,
         "\n\n".join([t for t in text_pages if t]),
-        usage_amount=float(usage.amount),
-        usage_id=usage.uid,
+        usage_amount=float(usage.amount) if usage else None,
+        usage_id=usage.uid if usage else None,
     )
 
     return task

@@ -22,8 +22,10 @@ class Settings(config.Settings):
     coverage_dir: Path = base_dir / "htmlcov"
     currency: str = "IRR"
 
-    finance_api_key: str | None = os.getenv("API_KEY")
+    finance_api_key: str | None = os.getenv("FINANCE_API_KEY")
+    finance_base_url: str | None = os.getenv("FINANCE_BASE_URL")
     media_api_key: str | None = os.getenv("MEDIA_API_KEY")
+    media_base_url: str | None = os.getenv("MEDIA_BASE_URL")
 
     gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
     metis_api_key: str | None = os.getenv("METIS_API_KEY")
@@ -34,9 +36,9 @@ class Settings(config.Settings):
 
     minutes_price: float = float(os.getenv("MINUTES_PRICE", 1))
 
-    transcribe_enable_chunking: bool = os.getenv(
-        "TRANSCRIBE_ENABLE_CHUNKING", "1"
-    ) == "1"
+    transcribe_enable_chunking: bool = (
+        os.getenv("TRANSCRIBE_ENABLE_CHUNKING", "1") == "1"
+    )
     transcribe_chunk_min_minutes: int = int(
         os.getenv("TRANSCRIBE_CHUNK_MIN_MINUTES", 5)
     )
@@ -56,9 +58,9 @@ class Settings(config.Settings):
     transcribe_poll_interval_seconds: float = float(
         os.getenv("TRANSCRIBE_POLL_INTERVAL_SECONDS", 5)
     )
-    transcribe_chunking_fallback_single: bool = os.getenv(
-        "TRANSCRIBE_CHUNKING_FALLBACK_SINGLE", "1"
-    ) == "1"
+    transcribe_chunking_fallback_single: bool = (
+        os.getenv("TRANSCRIBE_CHUNKING_FALLBACK_SINGLE", "1") == "1"
+    )
 
     @classmethod
     def get_log_config(cls, console_level: str = "INFO", **kwargs: object) -> dict:

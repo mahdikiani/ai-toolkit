@@ -15,7 +15,7 @@ resource_variant = getattr(Settings, "UFAAS_RESOURCE_VARIANT", "")
 @asynccontextmanager
 async def get_ufaas_client() -> AsyncGenerator[httpx.AsyncClient]:
     async with httpx.AsyncClient(
-        base_url="https://saas.uln.me/api/saas/v1/",
+        base_url=Settings.finance_base_url or "https://saas.uln.me/api/saas/v1/",
         headers={"x-api-key": Settings.finance_api_key or ""},
     ) as client:
         yield client
@@ -24,6 +24,8 @@ async def get_ufaas_client() -> AsyncGenerator[httpx.AsyncClient]:
 async def meter_cost(
     user_id: str, amount: float, meta_data: dict | None = None
 ) -> UsageSchema:
+    if not Settings.finance_api_key:
+        return None
     async with get_ufaas_client() as ufaas_client:
         usage_schema = UsageCreateSchema(
             user_id=user_id,
@@ -41,6 +43,8 @@ async def meter_cost(
 
 
 async def get_quota(user_id: str) -> Decimal:
+    if not Settings.finance_api_key:
+        return Decimal("inf")
     async with get_ufaas_client() as ufaas_client:
         quotas_response = await ufaas_client.get(
             "/enrollments/quotas",
@@ -54,6 +58,10 @@ async def get_quota(user_id: str) -> Decimal:
 async def cancel_usage(usage_id: str) -> None:
     if usage_id is None:
         return
+
+    if not Settings.finance_api_key:
+        return
+
     async with get_ufaas_client() as ufaas_client:
         await ufaas_client.post(f"/usages/{usage_id}/cancel")
 

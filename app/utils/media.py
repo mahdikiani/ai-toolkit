@@ -10,7 +10,7 @@ from server.config import Settings
 @asynccontextmanager
 async def get_media_client() -> AsyncGenerator[httpx.AsyncClient]:
     async with httpx.AsyncClient(
-        base_url="https://media.uln.me/api/media/v1/",
+        base_url=Settings.media_base_url or "https://media.uln.me/api/media/v1/",
         headers={"x-api-key": Settings.media_api_key or ""},
     ) as client:
         yield client

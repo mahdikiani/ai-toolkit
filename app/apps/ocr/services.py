@@ -54,8 +54,8 @@ async def process_ocr(task: OcrTask) -> OcrTask:
         return await save_result(
             task,
             result,
-            usage_amount=float(usage.amount),
-            usage_id=usage.uid,
+            usage_amount=float(usage.amount) if usage else None,
+            usage_id=usage.uid if usage else None,
         )
 
     except Exception:

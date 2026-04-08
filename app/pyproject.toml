@@ -23,6 +23,7 @@ dependencies = [
     "usso>=0.29.15",
     "uvicorn>=0.37.0",
     "zstandard>=0.25.0",
+    "python-multipart>=0.0.24",
 ]
 
 [dependency-groups]

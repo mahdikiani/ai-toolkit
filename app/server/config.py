@@ -34,6 +34,12 @@ class Settings(config.Settings):
     openrouter_api_key: str | None = os.getenv("OPENROUTER_API_KEY")
     soniox_api_key: str | None = os.getenv("SONIOX_API_KEY")
 
+    ocr_engine: str = os.getenv("OCR_ENGINE", "openrouter")
+    paddle_pipeline_name: str = os.getenv(
+        "PADDLE_PIPELINE_NAME", "PaddleOCR-VL-1.5"
+    )
+    paddle_device: str = os.getenv("PADDLE_DEVICE", "cpu")
+
     minutes_price: float = float(os.getenv("MINUTES_PRICE", 1))
 
     transcribe_enable_chunking: bool = (

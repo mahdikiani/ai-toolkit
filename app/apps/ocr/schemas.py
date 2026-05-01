@@ -1,6 +1,7 @@
 import base64
 import binascii
 import json
+from enum import StrEnum
 from io import BytesIO
 
 import httpx
@@ -8,6 +9,10 @@ from fastapi import Form, HTTPException
 from fastapi_mongo_base.schemas import UserOwnedEntitySchema
 from fastapi_mongo_base.tasks import TaskMixin
 from pydantic import BaseModel, Field
+
+class OcrEngineType(StrEnum):
+    llm = "llm"
+    paddle = "paddle"
 
 
 class OcrTaskSchemaCreate(BaseModel):
@@ -26,6 +31,13 @@ class OcrTaskSchemaCreate(BaseModel):
     )
     meta_data: dict | None = Field(
         None, description="Additional metadata to be included in the OCR result"
+    )
+    ocr_engine: OcrEngineType | None = Field(
+        None,
+        description=(
+            "OCR engine: llm (default) or paddleocr_vl_1_5. "
+            "When omitted, server default is used."
+        ),
     )
 
     @property
@@ -63,6 +75,7 @@ class OcrTaskUploadFormSchema(BaseModel):
     webhook_url: str | None = None
     webhook_custom_headers: dict | None = None
     meta_data: dict | None = None
+    ocr_engine: OcrEngineType | None = None
 
     @classmethod
     def as_form(
@@ -71,6 +84,7 @@ class OcrTaskUploadFormSchema(BaseModel):
         webhook_url: str | None = Form(None),
         webhook_custom_headers: str | None = Form(None),
         meta_data: str | None = Form(None),
+        ocr_engine: str | None = Form(None),
     ) -> "OcrTaskUploadFormSchema":
         try:
             parsed_webhook_headers = (
@@ -88,6 +102,7 @@ class OcrTaskUploadFormSchema(BaseModel):
             webhook_url=webhook_url,
             webhook_custom_headers=parsed_webhook_headers,
             meta_data=parsed_meta_data,
+            ocr_engine=ocr_engine,
         )
 
 

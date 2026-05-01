@@ -12,6 +12,7 @@ dependencies = [
     "pydub>=0.25.1",
     "mypy>=1.18.2",
     "openai>=2.6.1",
+    "paddlex[ocr]>=3.2.0",
     "pdf2image>=1.17.0",
     "pillow>=12.0.0",
     "python-docx>=1.2.0",
@@ -72,17 +73,15 @@ select = [
     "EXE", # executable: executable checking
     "ISC", # implicit string concatenation
     "G",   # misuse of logging string interpolation
-    # "D",     # docstrings: docstring checking
+    "D",     # docstrings: docstring checking
     # "ERA", # remove commented code
     "RUF", # ruff-specific improvements
 ]
-ignore = ["TRY003", "COM812", "B008"]
+ignore = ["TRY003", "COM812", "B008", "D202", "D203", "D209", "D212", "D413"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["G004", "S101", "S105", "S106", "B017"]
-"server/db.py" = ["TRY"]
-"apps/tenant/messaging/channels/sms.py" = ["ERA001"]
-
+"markdown_docx.py" = ["C901"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -95,6 +94,11 @@ disallow_untyped_defs = false
 disable_error_code = ["override"]
 
 [tool.ty.rules]
+
+[tool.uv.workspace]
+members = [
+    "test",
+]
 # unresolved-attribute = "ignore"
 # unresolved-import = "ignore"
 # division-by-zero = "warn"

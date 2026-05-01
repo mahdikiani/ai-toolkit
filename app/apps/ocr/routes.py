@@ -35,6 +35,12 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
     def config_routes(self, **kwargs: object) -> None:
         super().config_routes(update_route=False, **kwargs)
         self.router.add_api_route(
+            "/{uid:str}/start",
+            self.start_item,
+            methods=["POST"],
+            response_model=self.retrieve_response_schema,
+        )
+        self.router.add_api_route(
             "/{uid}/result",
             self.get_result,
             methods=["GET"],
@@ -114,6 +120,7 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
             webhook_url=data_form.webhook_url,
             webhook_custom_headers=data_form.webhook_custom_headers,
             meta_data=data_form.meta_data,
+            ocr_engine=data_form.ocr_engine,
         )
         return await self.create_item(
             request=request,

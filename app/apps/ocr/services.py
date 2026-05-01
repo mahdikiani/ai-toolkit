@@ -2,6 +2,8 @@ import logging
 
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
+from server.config import Settings
+
 from utils import finance, mime, texttools
 
 from .archive_services import process_compressed_archive
@@ -12,6 +14,19 @@ from .file_processors import (
 from .models import OcrTask
 from .no_ocr_services import process_direct_file
 from .ocr_services import prepare_pages, process_pages_batch
+from .paddle_ocr_services import process_pages_with_paddle
+
+
+def _resolve_ocr_engine(task: OcrTask) -> str:
+    engine = (task.ocr_engine or Settings.ocr_engine or "llm").lower().strip()
+    aliases = {
+        "paddle": "paddleocr_vl_1_5",
+        "paddleocr": "paddleocr_vl_1_5",
+        "paddleocr_v1.5": "paddleocr_vl_1_5",
+        "paddleocr_vl_1_5": "paddleocr_vl_1_5",
+        "paddleocr-vl-1.5": "paddleocr_vl_1_5",
+    }
+    return aliases.get(engine, "llm")
 
 
 async def process_ocr(task: OcrTask) -> OcrTask:
@@ -41,10 +56,15 @@ async def process_ocr(task: OcrTask) -> OcrTask:
             task.user_id, len(pages), raise_exception=False
         )
         if quota < len(pages):
+            logging.error("Insufficient quota for task %s", task.uid)
             return await save_error(task, "insufficient_quota")
 
         # Process pages with OCR
-        text_pages = await process_pages_batch(pages, max_concurrent=10)
+        engine = _resolve_ocr_engine(task)
+        if engine == "paddleocr_vl_1_5":
+            text_pages = await process_pages_with_paddle(pages)
+        else:
+            text_pages = await process_pages_batch(pages, max_concurrent=10)
 
         # Meter usage
         usage = await finance.meter_cost(task.user_id, len(pages))

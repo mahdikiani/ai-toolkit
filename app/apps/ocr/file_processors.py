@@ -1,3 +1,4 @@
+"""Provide module functionality."""
 
 # File type constants - following Open/Closed Principle
 CONVERTING_IMAGE_EXTS = {"image/png", "image/tiff", "image/webp"}

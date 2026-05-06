@@ -1,9 +1,9 @@
+"""Provide module functionality."""
 import logging
 
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
 from server.config import Settings
-
 from utils import finance, mime, texttools
 
 from .archive_services import process_compressed_archive
@@ -30,7 +30,7 @@ def _resolve_ocr_engine(task: OcrTask) -> str:
 
 
 async def process_ocr(task: OcrTask) -> OcrTask:
-    """Main OCR processing function - simplified version."""
+    """Process OCR for a task."""
     try:
         file_content = await task.file_content()
         file_type = mime.check_file_type(file_content)

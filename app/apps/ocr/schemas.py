@@ -1,3 +1,4 @@
+"""Provide module functionality."""
 import base64
 import binascii
 import json
@@ -10,12 +11,17 @@ from fastapi_mongo_base.schemas import UserOwnedEntitySchema
 from fastapi_mongo_base.tasks import TaskMixin
 from pydantic import BaseModel, Field
 
+
 class OcrEngineType(StrEnum):
+    """Represent OcrEngineType."""
+
     llm = "llm"
     paddle = "paddle"
 
 
 class OcrTaskSchemaCreate(BaseModel):
+    """Represent OcrTaskSchemaCreate."""
+
     file_url: str = Field(
         min_length=1,
         description="The URL of the file or base64 encoded data to be OCRed",
@@ -42,9 +48,11 @@ class OcrTaskSchemaCreate(BaseModel):
 
     @property
     def is_pdf(self) -> bool:
+        """Run is pdf."""
         return self.file_url.endswith(".pdf")
 
     async def file_content(self) -> BytesIO:
+        """Run file content."""
         if hasattr(self, "_file_content"):
             return getattr(self, "_file_content", BytesIO())
 
@@ -66,11 +74,14 @@ class OcrTaskSchemaCreate(BaseModel):
             return self._file_content
 
     async def file_content_base64(self) -> str:
+        """Run file content base64."""
         content = await self.file_content()
         return base64.b64encode(content.getvalue()).decode("utf-8")
 
 
 class OcrTaskUploadFormSchema(BaseModel):
+    """Represent OcrTaskUploadFormSchema."""
+
     user_id: str | None = None
     webhook_url: str | None = None
     webhook_custom_headers: dict | None = None
@@ -86,6 +97,7 @@ class OcrTaskUploadFormSchema(BaseModel):
         meta_data: str | None = Form(None),
         ocr_engine: str | None = Form(None),
     ) -> "OcrTaskUploadFormSchema":
+        """Run as form."""
         try:
             parsed_webhook_headers = (
                 json.loads(webhook_custom_headers) if webhook_custom_headers else None
@@ -107,11 +119,14 @@ class OcrTaskUploadFormSchema(BaseModel):
 
 
 class OcrTaskSchema(UserOwnedEntitySchema, TaskMixin, OcrTaskSchemaCreate):  # type: ignore[misc]
+    """Represent OcrTaskSchema."""
+
     result: str | None = None
     usage_amount: float | None = None
     usage_id: str | None = None
 
     @property
     def webhook_exclude_fields(self) -> set[str]:
+        """Run webhook exclude fields."""
         return {}
         return {"result"}

@@ -1,3 +1,4 @@
+"""Provide module functionality."""
 import asyncio
 import logging
 from functools import lru_cache
@@ -42,6 +43,7 @@ async def text_enhancement(
     text: str,
     model: str = "google/gemini-2.5-flash",
 ) -> str:
+    """Run text enhancement."""
     prompt = _read_text_enhancement_prompt()
     client = _get_ocr_client()
     response = await client.chat.completions.create(

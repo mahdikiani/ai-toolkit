@@ -121,6 +121,7 @@ async def run_directory_files(
 ) -> list[Path]:
     """
     Process all files in input_dir using file_processor.
+
     Return results as list of results.
     """
     file_paths = [
@@ -149,6 +150,7 @@ async def process_directory_files(
 ) -> list[Path]:
     """
     Process all files in input_dir using file_processor.
+
     Write results as .txt files in output_dir.
     """
 

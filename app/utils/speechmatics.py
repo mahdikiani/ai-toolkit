@@ -1,3 +1,4 @@
+"""Provide module functionality."""
 import json
 import os
 from datetime import datetime, timedelta
@@ -11,6 +12,8 @@ from singleton import Singleton
 
 
 class Language(StrEnum):
+    """Represent Language."""
+
     English = "English"
     Persian = "Persian"
     Arabic = "Arabic"
@@ -38,6 +41,7 @@ class Language(StrEnum):
 
     @classmethod
     def has_value(cls, value: str) -> bool:
+        """Run has value."""
         return value in cls._value2member_map_
 
     @property
@@ -167,25 +171,32 @@ class Language(StrEnum):
 
     @property
     def fa(self) -> str:
+        """Run fa."""
         return self._info["fa"]
 
     @property
     def en(self) -> str:
+        """Run en."""
         return self._info["en"]
 
     @property
     def abbreviation(self) -> str:
+        """Run abbreviation."""
         return self._info["abbreviation"]
 
     def get_dict(self) -> dict:
+        """Run get dict."""
         return self._info | {"value": self.value}
 
     @classmethod
     def get_choices(cls) -> list[dict]:
+        """Run get choices."""
         return [item.get_dict() for item in cls]
 
 
 class Alternative(BaseModel):
+    """Represent Alternative."""
+
     confidence: float
     content: str
     language: str
@@ -193,6 +204,8 @@ class Alternative(BaseModel):
 
 
 class TranscriptionResult(BaseModel):
+    """Represent TranscriptionResult."""
+
     alternatives: list[Alternative]
     end_time: float
     start_time: float
@@ -200,10 +213,14 @@ class TranscriptionResult(BaseModel):
 
 
 class LanguageIdentification(BaseModel):
+    """Represent LanguageIdentification."""
+
     predicted_language: str
 
 
 class LanguagePackInfo(BaseModel):
+    """Represent LanguagePackInfo."""
+
     adapted: bool
     itn: bool
     language_description: str
@@ -212,11 +229,15 @@ class LanguagePackInfo(BaseModel):
 
 
 class TranscriptionConfig(BaseModel):
+    """Represent TranscriptionConfig."""
+
     diarization: str | None = None
     language: str
 
 
 class Metadata(BaseModel):
+    """Represent Metadata."""
+
     created_at: datetime
     language_identification: LanguageIdentification
     language_pack_info: LanguagePackInfo
@@ -225,6 +246,8 @@ class Metadata(BaseModel):
 
 
 class Job(BaseModel):
+    """Represent Job."""
+
     id: str
     created_at: datetime
     data_name: str
@@ -232,6 +255,8 @@ class Job(BaseModel):
 
 
 class TranscribeWebhookSchema(BaseModel):
+    """Represent TranscribeWebhookSchema."""
+
     format: str
     job: Job
     metadata: Metadata
@@ -239,48 +264,63 @@ class TranscribeWebhookSchema(BaseModel):
 
     @property
     def duration(self) -> int:
+        """Run duration."""
         return self.job.duration
 
     @property
     def job_id(self) -> str:
+        """Run job id."""
         return self.job.id
 
     @property
     def language(self) -> str:
+        """Run language."""
         return self.metadata.language_identification.predicted_language
 
 
 class TranscriptionConfigDetails(BaseModel):
+    """Represent TranscriptionConfigDetails."""
+
     additional_vocab: list[str] | None = None
     channel_diarization_labels: list[str] | None = None
     language: str
 
 
 class JobConfig(BaseModel):
+    """Represent JobConfig."""
+
     notification_config: list[dict] | None = None
     transcription_config: TranscriptionConfigDetails
     type: str
 
 
 class JobStatus(StrEnum):
+    """Represent JobStatus."""
+
     running = "running"
     done = "done"
     rejected = "rejected"
 
     @classmethod
     def finishes(cls) -> list[Self]:
+        """Run finishes."""
         return [cls.done, cls.rejected]  # type: ignore[list-item]
 
     def is_finished(self) -> bool:
+        """Run is finished."""
         return self in self.finishes()
 
 
 class JobError(BaseModel):
+    """Represent JobError."""
+
     message: str
     timestamp: datetime
 
 
 class JobDetails(BaseModel):
+    """Represent JobDetails."""
+
     id: str
     created_at: datetime
     config: JobConfig
@@ -291,7 +331,10 @@ class JobDetails(BaseModel):
 
 
 class Speechmatics(metaclass=Singleton):
+    """Represent Speechmatics."""
+
     def __init__(self, api_key: str | None = None) -> None:
+        """Initialize the instance."""
         self.base_url = "https://asr.api.speechmatics.com/v2"
         self.api_key = api_key or os.getenv("SPEECHMATICS_API_KEY")
         self.headers = {"Authorization": f"Bearer {self.api_key}"}
@@ -308,6 +351,7 @@ class Speechmatics(metaclass=Singleton):
         enhanced: bool = True,
         **kwargs: object,
     ) -> str:
+        """Run create transcribe job."""
         conf: dict = {
             "type": "transcription",
             "audio_events_config": {"types": ["laughter", "music", "applause"]},
@@ -345,6 +389,7 @@ class Speechmatics(metaclass=Singleton):
 
     @basic.retry_execution(delay=5, attempts=3)
     async def get_transcribe_job(self, job_id: str, **kwargs: object) -> JobDetails:
+        """Run get transcribe job."""
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 url=f"{self.base_url}/jobs/{job_id}",
@@ -357,6 +402,7 @@ class Speechmatics(metaclass=Singleton):
     async def get_transcript(
         self, job_id: str, **kwargs: object
     ) -> TranscribeWebhookSchema:
+        """Run get transcript."""
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 url=f"{self.base_url}/jobs/{job_id}/transcript",
@@ -373,7 +419,7 @@ def transcript_to_sequence(
     # the Speechmatics API, which is a list of TranscriptionResult objects
     # and extracts a pair of lists, timings and sentences, that includes
     # sentences and their corresponding time-ranges.
-
+    """Run transcript to sequence."""
     sentences = []
     sen = []
     timings = []
@@ -400,6 +446,7 @@ def transcript_to_sequence(
 
 def generate_srt(timings: list[list[float]], sentence_seq: list[str]) -> str:
     # Function to convert time in seconds to SRT format
+    """Run generate srt."""
     def convert_time(seconds: float) -> str:
         time_delta = timedelta(seconds=seconds)
         hours, remainder = divmod(time_delta.seconds, 3600)
@@ -421,14 +468,17 @@ def generate_srt(timings: list[list[float]], sentence_seq: list[str]) -> str:
 
 
 def transcription_to_srt(transcript: list[TranscriptionResult]) -> str:
+    """Run transcription to srt."""
     timings, sentences, _ = transcript_to_sequence(transcript)
     return generate_srt(timings, sentences)
 
 
 def transcription_to_text(transcript: list[TranscriptionResult]) -> str:
+    """Run transcription to text."""
     _, sentences, _ = transcript_to_sequence(transcript)
     return "\n".join(sentences)
 
 
 def transcription_to_json(transcript: list[TranscriptionResult]) -> str:
+    """Run transcription to json."""
     return json.dumps(transcript)

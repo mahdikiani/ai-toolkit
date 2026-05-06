@@ -28,6 +28,7 @@ class AudioChunk(BaseModel):
 
     @property
     def duration_ms(self) -> int:
+        """Run duration ms."""
         return self.end_ms - self.start_ms
 
 
@@ -39,10 +40,13 @@ class ChunkPlan(BaseModel):
     workspace: Path
 
     def cleanup(self) -> None:
+        """Run cleanup."""
         shutil.rmtree(self.workspace, ignore_errors=True)
 
 
 class ChunkTranscriptionResult(BaseModel):
+    """Represent ChunkTranscriptionResult."""
+
     chunk: AudioChunk
     job_id: str
     text: str = Field(default="")

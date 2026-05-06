@@ -1,3 +1,4 @@
+"""Provide module functionality."""
 import logging
 import shutil
 from io import BytesIO

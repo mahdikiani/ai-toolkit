@@ -1,3 +1,4 @@
+"""Provide module functionality."""
 import base64
 import mimetypes
 from io import BytesIO
@@ -38,6 +39,7 @@ def _b64_bytes(data: BytesIO) -> str:
 
 
 def b64_file(file_path: Path | str | Image.Image) -> str:
+    """Run b64 file."""
     if isinstance(file_path, Image.Image):
         return _b64_image(file_path)
     if isinstance(file_path, BytesIO):

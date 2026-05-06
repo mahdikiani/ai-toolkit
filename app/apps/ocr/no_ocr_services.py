@@ -1,3 +1,4 @@
+"""Provide module functionality."""
 from io import BytesIO
 
 from utils import texttools

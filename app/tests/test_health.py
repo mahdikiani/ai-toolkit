@@ -1,3 +1,4 @@
+"""Provide module functionality."""
 import httpx
 import pytest
 

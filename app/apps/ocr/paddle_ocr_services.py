@@ -1,3 +1,4 @@
+"""Provide module functionality."""
 import asyncio
 import logging
 import tempfile
@@ -9,7 +10,7 @@ from server.config import Settings
 
 
 @lru_cache(maxsize=1)
-def _get_pipeline():
+def _get_pipeline() -> object:
     import paddlex as pdx
 
     return pdx.create_pipeline(
@@ -65,6 +66,7 @@ def _predict_single_image(page: BytesIO) -> str | None:
 
 
 async def process_pages_with_paddle(pages: list[BytesIO]) -> list[str | None]:
+    """Run process pages with paddle."""
     async def _run(page: BytesIO) -> str | None:
         try:
             return await asyncio.to_thread(_predict_single_image, page)

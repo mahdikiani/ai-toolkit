@@ -1,3 +1,4 @@
+"""Provide module functionality."""
 import logging
 import mimetypes
 import os
@@ -9,7 +10,10 @@ from PIL import Image
 
 
 class DifyClient(httpx.Client):
+    """Represent DifyClient."""
+
     def __init__(self, api_key: str | None = None) -> None:
+        """Initialize the instance."""
         api_key = api_key or os.getenv("DIFY_API_KEY", "")
         if not api_key or not api_key.strip():
             raise ValueError("DIFY_API_KEY environment variable is not set")
@@ -22,6 +26,7 @@ class DifyClient(httpx.Client):
         )
 
     def upload_file(self, file: Path | str) -> str:
+        """Run upload file."""
         if isinstance(file, str):
             file = Path(file)
         with open(file, "rb") as f:
@@ -32,6 +37,7 @@ class DifyClient(httpx.Client):
             return response.json().get("id")
 
     def upload_image(self, image: Image.Image) -> str:
+        """Run upload image."""
         with BytesIO() as output:
             image.save(output, format="jpeg")
             output.seek(0)
@@ -42,6 +48,7 @@ class DifyClient(httpx.Client):
             return response.json().get("id")
 
     def chat_messages(self, prompt: str, file_id: str | None = None) -> str:
+        """Run chat messages."""
         json_data = {
             "inputs": {},
             "query": prompt,
@@ -63,6 +70,7 @@ class DifyClient(httpx.Client):
         return response.json().get("answer")
 
     def ocr_image(self, file: Path | str | Image.Image) -> str:
+        """Run ocr image."""
         if isinstance(file, Image.Image):
             file_id = self.upload_image(file)
         else:
@@ -71,7 +79,10 @@ class DifyClient(httpx.Client):
 
 
 class AsyncDifyClient(httpx.AsyncClient):
+    """Represent AsyncDifyClient."""
+
     def __init__(self, api_key: str | None = None) -> None:
+        """Initialize the instance."""
         api_key = api_key or os.getenv("DIFY_API_KEY", "")
         if not api_key or not api_key.strip():
             raise ValueError("DIFY_API_KEY environment variable is not set")
@@ -83,6 +94,7 @@ class AsyncDifyClient(httpx.AsyncClient):
         )
 
     async def upload_file(self, file: Path | str) -> str:
+        """Run upload file."""
         import aiofiles
 
         if isinstance(file, str):
@@ -95,12 +107,14 @@ class AsyncDifyClient(httpx.AsyncClient):
             return response.json().get("id")
 
     async def upload_image(self, image: Image.Image) -> str:
+        """Run upload image."""
         with BytesIO() as output:
             image.save(output, format="jpeg")
             output.seek(0)
             return await self.upload_file_bytes(output)
 
     async def upload_file_bytes(self, file: BytesIO) -> str:
+        """Run upload file bytes."""
         file.seek(0)
         files = {"file": ("image.jpg", file.read(), "image/jpeg")}
         payload = {"user": "me"}
@@ -109,6 +123,7 @@ class AsyncDifyClient(httpx.AsyncClient):
         return response.json().get("id")
 
     async def chat_messages(self, prompt: str, file_id: str | None = None) -> str:
+        """Run chat messages."""
         json_data = {
             "inputs": {},
             "query": prompt,
@@ -130,6 +145,7 @@ class AsyncDifyClient(httpx.AsyncClient):
         return response.json().get("answer")
 
     async def translate(self, prompt: str) -> str:
+        """Run translate."""
         json_data = {
             "inputs": {},
             "query": prompt,
@@ -142,6 +158,7 @@ class AsyncDifyClient(httpx.AsyncClient):
         return response.json().get("answer")
 
     async def ocr_image(self, file: Path | str | Image.Image | BytesIO) -> str:
+        """Run ocr image."""
         if isinstance(file, Image.Image):
             file_id = await self.upload_image(file)
         elif isinstance(file, BytesIO):

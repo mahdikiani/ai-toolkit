@@ -1,3 +1,4 @@
+"""Provide module functionality."""
 from io import BytesIO
 from pathlib import Path
 
@@ -5,9 +6,7 @@ import magic
 
 
 def check_path_file_type(file_path: Path) -> str:
-    """
-    Check and validate file MIME type.
-    """
+    """Check and validate file MIME type."""
     with open(file_path, "rb") as file:
         return check_file_type(BytesIO(file.read(2048)))
 

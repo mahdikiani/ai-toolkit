@@ -1,3 +1,4 @@
+"""Provide module functionality."""
 import asyncio
 
 from fastapi_mongo_base.tasks import TaskStatusEnum
@@ -9,6 +10,7 @@ from .models import TranslateTask
 
 
 async def process_translate(task: TranslateTask) -> TranslateTask:
+    """Run process translate."""
     pages = [task.text]
     async with dify.AsyncDifyClient(Settings.pishrun_api_key) as client:
         sem = asyncio.Semaphore(16)
@@ -36,6 +38,7 @@ async def save_result(
     usage_amount: float | None = None,
     usage_id: str | None = None,
 ) -> TranslateTask:
+    """Run save result."""
     task.result = texttools.normalize_text(result)
     task.task_status = TaskStatusEnum.completed
     task.usage_amount = usage_amount

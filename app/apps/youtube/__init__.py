@@ -1,0 +1,1 @@
+"""YouTube transcription application module."""

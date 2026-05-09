@@ -31,6 +31,9 @@ class Settings(config.Settings):
     media_api_key: str | None = os.getenv("MEDIA_API_KEY")
     media_base_url: str | None = os.getenv("MEDIA_BASE_URL")
 
+    youtube_transcript_api_key: str | None = os.getenv(
+        "YOUTUBE_TRANSCRIPT_API_KEY"
+    )
     openrouter_api_key: str | None = os.getenv("OPENROUTER_API_KEY")
     openrouter_base_url: str = os.getenv(
         "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"

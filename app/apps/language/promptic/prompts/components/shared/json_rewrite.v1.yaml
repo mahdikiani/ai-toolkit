@@ -1,0 +1,36 @@
+metadata:
+  id: shared.component.json_rewrite.v1
+  name: "JSON Rewrite"
+  version: "1"
+  description: بازنویسی JSON خراب بر اساس ساختار هدف
+
+components:
+  json_rewrite:
+    task: |
+      Rewrite the given **broken/invalid JSON** to produce valid JSON.
+      If a target schema/structure is provided, conform the output to it.
+      Preserve data semantics. Fix syntax errors, encoding issues, formatting.
+      Output language for string values: {{language}}.
+    tone: precise.
+    output_schema:
+      json_rewrite:
+        result: "string"
+
+task:
+  system:
+    personas: |
+      You are a **JSON Repair Specialist**. Given broken JSON and optional schema, produce valid JSON.
+    components:
+      - json_rewrite
+    constraints: |
+      Return ONLY valid JSON. No markdown, no explanations.
+  user: |
+    <broken_json>
+      {{broken_json}}
+    </broken_json>
+    <target_schema>
+      {{target_schema}}
+    </target_schema>
+    <language>
+      {{language}}
+    </language>

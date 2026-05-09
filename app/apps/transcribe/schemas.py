@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Transcribe task schemas and data models."""
+
 import base64
 from io import BytesIO
 
@@ -11,14 +12,14 @@ from server.config import Settings
 
 
 class TranscribeTaskSchemaCreate(BaseModel):
-    """Represent TranscribeTaskSchemaCreate."""
+    """Schema for creating a new transcription task."""
 
     file_url: str
     user_id: str | None = None
     webhook_url: str | None = None
 
     async def file_content(self) -> BytesIO:
-        """Run file content."""
+        """Fetch and return audio file content from URL."""
         if hasattr(self, "_file_content"):
             return getattr(self, "_file_content", BytesIO())
 
@@ -30,13 +31,13 @@ class TranscribeTaskSchemaCreate(BaseModel):
             return self._file_content
 
     async def file_content_base64(self) -> str:
-        """Run file content base64."""
+        """Return audio file content encoded as base64 string."""
         content = await self.file_content()
         return base64.b64encode(content.getvalue()).decode("utf-8")
 
 
 class ChunkMetadata(BaseModel):
-    """Represent ChunkMetadata."""
+    """Metadata for a transcribed audio chunk."""
 
     chunk_id: int
     start_ms: int
@@ -49,7 +50,7 @@ class ChunkMetadata(BaseModel):
 class TranscribeTaskSchema(  # type: ignore[misc]
     UserOwnedEntitySchema, TaskMixin, TranscribeTaskSchemaCreate
 ):
-    """Represent TranscribeTaskSchema."""
+    """Complete transcription task schema including result and chunk metadata."""
 
     result: str | None = None
     usage_amount: float | None = None
@@ -59,13 +60,13 @@ class TranscribeTaskSchema(  # type: ignore[misc]
 
     @property
     def audio_duration(self) -> float:
+        """Return audio duration in seconds (placeholder)."""
         # todo: get audio duration from file
-        """Run audio duration."""
         return 5
 
     @property
     def item_url(self) -> str:
-        """Run item url."""
+        """Return the full URL for this transcription task."""
         return "/".join([
             f"https://{Settings.root_url}{Settings.base_path}",
             "transcribes",

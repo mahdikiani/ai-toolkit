@@ -1,1 +1,1 @@
-"""Initialize package."""
+"""Application modules package."""

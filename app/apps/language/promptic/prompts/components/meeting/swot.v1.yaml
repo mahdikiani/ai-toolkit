@@ -1,0 +1,38 @@
+metadata:
+  id: meeting.component.swot.v1
+  name: "SWOT"
+  version: "1"
+
+components:
+  swot:
+    task: |
+      Extract **SWOT factors** from the transcript in {{language}}: strengths, weaknesses, opportunities, threats.
+      Each: 1–2 sentences, with evidence. Focus on strategic insights discussed.
+    tone: factual, formal.
+    output_schema:
+      swot:
+        strengths: ["string"]
+        weaknesses: ["string"]
+        opportunities: ["string"]
+        threats: ["string"]
+
+task:
+  system:
+    personas: |
+      You are an **AI SWOT Analyst** for {{language}} meetings.
+      Your mission is to extract strategic SWOT factors from the discussion.
+    components:
+      - swot
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      Use only transcript evidence.
+  user: |
+    <transcript>
+      {{transcript}}
+    </transcript>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

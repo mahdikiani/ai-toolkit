@@ -1,0 +1,35 @@
+metadata:
+  id: task.document_primary.v1
+  name: "Document Primary (Stage 1)"
+  version: "1"
+  description: |
+    مرحله اولیه سند: عنوان، نوع، شماره، تاریخ، موضوع، خلاصه.
+    inputs: متن سند، متن پیوست‌ها، انتیتی‌ها، ارجاعات
+
+components:
+  document_metadata:
+    file: "../components/document/document_metadata.v1.yaml#document_metadata"
+  summary:
+    file: "../components/document/summary.v1.yaml#summary"
+
+task:
+  system:
+    personas: |
+      You are a **Document Primary Extractor** for {{language}} documents.
+      Your mission is to extract metadata (title, type, number, date, subject) and produce a summary.
+    components:
+      - document_metadata
+      - summary
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      Use only document evidence.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

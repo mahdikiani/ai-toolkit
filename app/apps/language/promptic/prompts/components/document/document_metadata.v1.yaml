@@ -1,0 +1,39 @@
+metadata:
+  id: document.component.document_metadata.v1
+  name: "Document Metadata"
+  version: "1"
+
+components:
+  document_metadata:
+    task: |
+      Extract **document metadata** from the text: title (عنوان), type (نوع سند), reference number (شماره سند), date (تاریخ سند), subject (موضوع سند).
+      Use {{language}} for output. Base only on document evidence.
+    tone: neutral, factual.
+    output_schema:
+      document_metadata:
+        title: "string"
+        document_type: "string"
+        reference_number: "string"
+        date: "string"
+        subject: "string"
+
+task:
+  system:
+    personas: |
+      You are a **Document Metadata Extractor** for {{language}} documents.
+      Your mission is to extract title, type, reference number, date, and subject.
+    components:
+      - document_metadata
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      No hallucination; use only document evidence.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

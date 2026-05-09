@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""OCR services for text extraction using OpenRouter API."""
+
 import asyncio
 import logging
 from functools import lru_cache
@@ -20,7 +21,7 @@ def _get_ocr_client() -> AsyncOpenAI:
     global _ocr_client
     if _ocr_client is None:
         _ocr_client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1", api_key=Settings.openrouter_api_key
+            base_url=Settings.openrouter_base_url, api_key=Settings.openrouter_api_key
         )
     return _ocr_client
 
@@ -43,7 +44,7 @@ async def text_enhancement(
     text: str,
     model: str = "google/gemini-2.5-flash",
 ) -> str:
-    """Run text enhancement."""
+    """Enhance OCR text quality using LLM post-processing."""
     prompt = _read_text_enhancement_prompt()
     client = _get_ocr_client()
     response = await client.chat.completions.create(

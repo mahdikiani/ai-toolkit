@@ -1,0 +1,56 @@
+metadata:
+  id: task.document_report.v1
+  name: "Document Report (Full)"
+  version: "1"
+  description: |
+    ساخت گزارش از سند: خلاصه، نتایج کلیدی، شاخص‌های کیفی، نقشه ذهنی، تصمیمات/وظایف/موضوعات، کلمات کلیدی، تعاملات، کوییز، SWOT.
+    inputs: متن سند، متادیتای مرحله اول، پیوست‌ها، ارجاعات
+
+components:
+  summary:
+    file: "../components/document/summary.v1.yaml#summary"
+  key_results:
+    file: "../components/document/key_results.v1.yaml#key_results"
+  quality_indicators:
+    file: "../components/document/quality_indicators.v1.yaml#quality_indicators"
+  mindmap:
+    file: "../components/document/mindmap.v1.yaml#mindmap"
+  topics_decisions_tasks:
+    file: "../components/document/topics_decisions_tasks.v1.yaml#topics_decisions_tasks"
+  keyword_cloud:
+    file: "../components/document/keyword_cloud.v1.yaml#keyword_cloud"
+  entities:
+    file: "../components/document/entities.v1.yaml#entities"
+  quiz:
+    file: "../components/document/quiz.v1.yaml#quiz"
+  swot:
+    file: "../components/document/swot.v1.yaml#swot"
+
+task:
+  system:
+    personas: |
+      You are a **Document Report Builder** for {{language}} documents.
+      Your mission is to produce a comprehensive report: summary, key results, quality indicators, mindmap, decisions/tasks/topics, keywords, entities, quiz, SWOT.
+    components:
+      - summary
+      - key_results
+      - quality_indicators
+      - mindmap
+      - topics_decisions_tasks
+      - keyword_cloud
+      - entities
+      - quiz
+      - swot
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      Use only document evidence.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

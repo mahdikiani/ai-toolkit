@@ -1,0 +1,38 @@
+metadata:
+  id: meeting.component.meeting_type_title.v1
+  name: "Meeting Type & Title"
+  version: "1"
+
+components:
+  meeting_type_title:
+    task: |
+      Analyze the meeting transcript and metadata to identify **the meeting type** and **the meeting title** in {{language}}.
+      Meeting type: classify as formal/informal, internal/external, status_update/decision_making/brainstorming/negotiation etc.
+      Meeting title: derive a concise {{language}} title that captures the main subject.
+    tone: neutral, factual.
+    output_schema:
+      meeting_type_title:
+        meeting_type: "string"
+        title: "string"
+        confidence: "number"
+
+task:
+  system:
+    personas: |
+      You are an **AI Meeting Classifier** for {{language}} meetings.
+      Your mission is to extract the meeting type and a clear title from the transcript and metadata.
+    components:
+      - meeting_type_title
+    constraints: |
+      Return ONLY valid JSON. No markdown, no explanations.
+      Never guess beyond transcript evidence.
+  user: |
+    <transcript>
+      {{transcript}}
+    </transcript>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

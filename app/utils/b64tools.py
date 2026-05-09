@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Utilities for converting files and images to base64 data URIs."""
+
 import base64
 import mimetypes
 from io import BytesIO
@@ -39,7 +40,15 @@ def _b64_bytes(data: BytesIO) -> str:
 
 
 def b64_file(file_path: Path | str | Image.Image) -> str:
-    """Run b64 file."""
+    """
+    Convert a file, image, or BytesIO to a base64 data URI.
+
+    Args:
+        file_path: Path to file, PIL Image, or BytesIO object.
+
+    Returns:
+        Base64-encoded data URI string with appropriate MIME type.
+    """
     if isinstance(file_path, Image.Image):
         return _b64_image(file_path)
     if isinstance(file_path, BytesIO):

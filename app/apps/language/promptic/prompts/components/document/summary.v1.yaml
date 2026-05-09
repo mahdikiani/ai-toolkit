@@ -1,0 +1,35 @@
+metadata:
+  id: document.component.summary.v1
+  name: "Summary"
+  version: "1"
+
+components:
+  summary:
+    task: |
+      Produce a **concise summary** of the document in {{language}}.
+      Explain: document type, parties, main subject, key points, outcomes.
+      Single paragraph (۳–۷ جمله). Neutral tone, suitable for official documents.
+    tone: neutral.
+    output_schema:
+      summary:
+        text: "string"
+
+task:
+  system:
+    personas: |
+      You are a **Document Summarizer** for {{language}} documents.
+      Your mission is to produce a concise, readable summary.
+    components:
+      - summary
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

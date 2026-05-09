@@ -1,0 +1,41 @@
+metadata:
+  id: task.meeting_primary.v1
+  name: "Meeting Primary (Stage 1)"
+  version: "1"
+  description: |
+    مرحله اول استخراج جلسه: شرح مختصر، محورهای کلیدی، نتایج، نوع جلسه.
+    inputs: متن خام جلسه، اطلاعات تکمیلی، متادیتا
+
+components:
+  abstract:
+    file: "../components/meeting/abstract.v1.yaml#abstract"
+  main_topic:
+    file: "../components/meeting/main_topic.v1.yaml#main_topic"
+  outcomes:
+    file: "../components/meeting/outcomes.v1.yaml#outcomes"
+  meeting_type_title:
+    file: "../components/meeting/meeting_type_title.v1.yaml#meeting_type_title"
+
+task:
+  system:
+    personas: |
+      You are an **AI Meeting Primary Extractor** for {{language}} meetings.
+      Your mission is to perform stage‑1 extraction: abstract, key topics, results, and meeting type.
+    components:
+      - abstract
+      - main_topic
+      - outcomes
+      - meeting_type_title
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      Never guess beyond transcript evidence.
+  user: |
+    <transcript>
+      {{transcript}}
+    </transcript>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

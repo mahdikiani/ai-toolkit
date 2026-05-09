@@ -1,0 +1,37 @@
+metadata:
+  id: document.component.topics_decisions_tasks.v1
+  name: "Decisions, Tasks & Topics"
+  version: "1"
+
+components:
+  topics_decisions_tasks:
+    task: |
+      Extract **topics, decisions, and tasks** from the document in {{language}}.
+      Group decisions and tasks under their topics.
+      Keys in English; content in {{language}}. No invented content.
+    tone: factual.
+    output_schema:
+      topics_decisions_tasks:
+        topics: ["string"]
+        decisions: ["string"]
+        tasks: ["string"]
+
+task:
+  system:
+    personas: |
+      You are a **Document Analyst** for {{language}} documents.
+      Your mission is to extract topics, decisions, and tasks in structured form.
+    components:
+      - topics_decisions_tasks
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

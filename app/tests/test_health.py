@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Health endpoint tests."""
+
 import httpx
 import pytest
 

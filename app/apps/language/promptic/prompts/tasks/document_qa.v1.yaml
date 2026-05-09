@@ -1,0 +1,34 @@
+metadata:
+  id: task.document_qa.v1
+  name: "Document Q&A"
+  version: "1"
+  description: |
+    پرسش از سند: سوال کاربر → عنوان + پاسخ بر اساس محتوای سند.
+    inputs: متن سند، متادیتا، سوال کاربر
+
+components:
+  document_qa:
+    file: "../components/shared/document_qa.v1.yaml#document_qa"
+
+task:
+  system:
+    personas: |
+      You are a **Document Q&A Assistant** for {{language}} documents.
+      Answer user questions from the document content.
+    components:
+      - document_qa
+    constraints: |
+      Return ONLY valid JSON. Use only document evidence.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <context>
+      {{context}}
+    </context>
+    <question>
+      {{question}}
+    </question>
+    <language>
+      {{language}}
+    </language>

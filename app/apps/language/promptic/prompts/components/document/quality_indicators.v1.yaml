@@ -1,0 +1,37 @@
+metadata:
+  id: document.component.quality_indicators.v1
+  name: "Quality Indicators"
+  version: "1"
+
+components:
+  quality_indicators:
+    task: |
+      Derive **quality indicators** for the document: clarity, completeness, structure, consistency.
+      For each: label (high/medium/low), optional score, short {{language}} explanation.
+    tone: neutral, analytical.
+    output_schema:
+      quality_indicators:
+        clarity: "string"
+        completeness: "string"
+        structure: "string"
+        confidence: "number"
+
+task:
+  system:
+    personas: |
+      You are a **Document Quality Evaluator** for {{language}} documents.
+      Your mission is to assess document quality based on observable patterns.
+    components:
+      - quality_indicators
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

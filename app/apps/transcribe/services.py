@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Transcription task processing services."""
+
 import asyncio
 import logging
 import math
@@ -18,7 +19,7 @@ from soniox.types import (
 from server.config import Settings
 from utils import conditions, finance, texttools
 
-from . import chunker
+from . import chunker_ffmpeg as chunker
 from .models import TranscribeTask
 
 soniox = SonioxClient(Settings.soniox_api_key)
@@ -32,7 +33,11 @@ async def process_transcribe(
     sync: bool = False,
     **kwargs: object,
 ) -> TranscribeTask:
-    """Run process transcribe."""
+    """
+    Process a transcription task.
+
+    Chunk audio and submit to transcription service.
+    """
     logging.info("Starting processing for task %s", task.uid)
 
     quota = await finance.check_quota(
@@ -264,7 +269,7 @@ def _build_transcription_config(
 async def save_error(
     task: TranscribeTask, message: str, **kwargs: object
 ) -> TranscribeTask:
-    """Run save error."""
+    """Save error result for a transcription task."""
     task.task_status = TaskStatusEnum.error
     await task.save_report(message)
     await conditions.Conditions().release_condition(task.uid)
@@ -278,7 +283,7 @@ async def save_result(
     usage_amount: float | None = None,
     usage_id: str | None = None,
 ) -> TranscribeTask:
-    """Run save result."""
+    """Save successful result for a transcription task."""
     task.result = texttools.normalize_text(result)
     task.task_status = TaskStatusEnum.completed
     task.usage_amount = usage_amount
@@ -291,9 +296,9 @@ async def process_transcription_webhook(
     # data: speechmatics.TranscribeWebhookSchema
     data: TranscriptionWebhook,
 ) -> TranscribeTask:
+    """Process transcription completion webhook and save results."""
     # Process the webhook data
     # Extract the sentences and timings from the data
-    """Run process transcription webhook."""
     translation_cost = 0
 
     if not task.transcription_job_id or task.transcription_job_id != data.id:
@@ -329,12 +334,12 @@ async def process_transcription_webhook(
 async def process_error_webhook(
     task: TranscribeTask, message: str = ""
 ) -> TranscribeTask:
+    """Process error webhook for a failed transcription task."""
     # speechmatic_task: speechmatics.JobDetails = (
     #     await speechmatics.Speechmatics().get_transcribe_job(
     #        task.transcription_job_id
     #     )
     # )
-    """Run process error webhook."""
     if not task.transcription_job_id:
         return await save_error(task, "Transcription job ID is required")
     job = await soniox.get_transcription_job_async(task.transcription_job_id)

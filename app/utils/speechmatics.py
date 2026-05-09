@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Speechmatics API client and transcription utilities."""
+
 import json
 import os
 from datetime import datetime, timedelta
@@ -12,7 +13,7 @@ from singleton import Singleton
 
 
 class Language(StrEnum):
-    """Represent Language."""
+    """Enumeration of supported languages for speech transcription."""
 
     English = "English"
     Persian = "Persian"
@@ -41,7 +42,15 @@ class Language(StrEnum):
 
     @classmethod
     def has_value(cls, value: str) -> bool:
-        """Run has value."""
+        """
+        Check if a value exists in the Language enum.
+
+        Args:
+            value: String value to check.
+
+        Returns:
+            True if the value is a valid language.
+        """
         return value in cls._value2member_map_
 
     @property
@@ -171,31 +180,56 @@ class Language(StrEnum):
 
     @property
     def fa(self) -> str:
-        """Run fa."""
+        """
+        Get the Persian name of the language.
+
+        Returns:
+            Persian language name.
+        """
         return self._info["fa"]
 
     @property
     def en(self) -> str:
-        """Run en."""
+        """
+        Get the English name of the language.
+
+        Returns:
+            English language name.
+        """
         return self._info["en"]
 
     @property
     def abbreviation(self) -> str:
-        """Run abbreviation."""
+        """
+        Get the language abbreviation code.
+
+        Returns:
+            Language abbreviation (e.g., 'en', 'fa').
+        """
         return self._info["abbreviation"]
 
     def get_dict(self) -> dict:
-        """Run get dict."""
+        """
+        Get a dictionary representation of the language with all metadata.
+
+        Returns:
+            Dictionary containing fa, en, abbreviation, and value.
+        """
         return self._info | {"value": self.value}
 
     @classmethod
     def get_choices(cls) -> list[dict]:
-        """Run get choices."""
+        """
+        Get all languages as a list of dictionary choices.
+
+        Returns:
+            List of language dictionaries for use in form choices.
+        """
         return [item.get_dict() for item in cls]
 
 
 class Alternative(BaseModel):
-    """Represent Alternative."""
+    """Represents a transcription alternative with confidence and content."""
 
     confidence: float
     content: str
@@ -204,7 +238,7 @@ class Alternative(BaseModel):
 
 
 class TranscriptionResult(BaseModel):
-    """Represent TranscriptionResult."""
+    """Represents a single transcription result with timing and alternatives."""
 
     alternatives: list[Alternative]
     end_time: float
@@ -213,13 +247,13 @@ class TranscriptionResult(BaseModel):
 
 
 class LanguageIdentification(BaseModel):
-    """Represent LanguageIdentification."""
+    """Contains language identification results from transcription."""
 
     predicted_language: str
 
 
 class LanguagePackInfo(BaseModel):
-    """Represent LanguagePackInfo."""
+    """Contains metadata about the language pack used for transcription."""
 
     adapted: bool
     itn: bool
@@ -229,14 +263,14 @@ class LanguagePackInfo(BaseModel):
 
 
 class TranscriptionConfig(BaseModel):
-    """Represent TranscriptionConfig."""
+    """Basic transcription configuration with diarization and language."""
 
     diarization: str | None = None
     language: str
 
 
 class Metadata(BaseModel):
-    """Represent Metadata."""
+    """Transcription metadata including creation time and configuration."""
 
     created_at: datetime
     language_identification: LanguageIdentification
@@ -246,7 +280,7 @@ class Metadata(BaseModel):
 
 
 class Job(BaseModel):
-    """Represent Job."""
+    """Represents a Speechmatics transcription job with basic info."""
 
     id: str
     created_at: datetime
@@ -255,7 +289,7 @@ class Job(BaseModel):
 
 
 class TranscribeWebhookSchema(BaseModel):
-    """Represent TranscribeWebhookSchema."""
+    """Schema for transcription webhook response with results and metadata."""
 
     format: str
     job: Job
@@ -264,22 +298,37 @@ class TranscribeWebhookSchema(BaseModel):
 
     @property
     def duration(self) -> int:
-        """Run duration."""
+        """
+        Get the duration of the transcribed media in seconds.
+
+        Returns:
+            Duration in seconds.
+        """
         return self.job.duration
 
     @property
     def job_id(self) -> str:
-        """Run job id."""
+        """
+        Get the unique job identifier.
+
+        Returns:
+            Job ID string.
+        """
         return self.job.id
 
     @property
     def language(self) -> str:
-        """Run language."""
+        """
+        Get the predicted language from transcription.
+
+        Returns:
+            Predicted language string.
+        """
         return self.metadata.language_identification.predicted_language
 
 
 class TranscriptionConfigDetails(BaseModel):
-    """Represent TranscriptionConfigDetails."""
+    """Detailed transcription configuration with vocabulary and labels."""
 
     additional_vocab: list[str] | None = None
     channel_diarization_labels: list[str] | None = None
@@ -287,7 +336,7 @@ class TranscriptionConfigDetails(BaseModel):
 
 
 class JobConfig(BaseModel):
-    """Represent JobConfig."""
+    """Configuration for a transcription job including notifications."""
 
     notification_config: list[dict] | None = None
     transcription_config: TranscriptionConfigDetails
@@ -295,7 +344,7 @@ class JobConfig(BaseModel):
 
 
 class JobStatus(StrEnum):
-    """Represent JobStatus."""
+    """Enumeration of possible transcription job statuses."""
 
     running = "running"
     done = "done"
@@ -303,23 +352,33 @@ class JobStatus(StrEnum):
 
     @classmethod
     def finishes(cls) -> list[Self]:
-        """Run finishes."""
+        """
+        Get the list of terminal job statuses.
+
+        Returns:
+            List of finished status values (done, rejected).
+        """
         return [cls.done, cls.rejected]  # type: ignore[list-item]
 
     def is_finished(self) -> bool:
-        """Run is finished."""
+        """
+        Check if the job status is terminal.
+
+        Returns:
+            True if the job is done or rejected.
+        """
         return self in self.finishes()
 
 
 class JobError(BaseModel):
-    """Represent JobError."""
+    """Represents an error that occurred during transcription."""
 
     message: str
     timestamp: datetime
 
 
 class JobDetails(BaseModel):
-    """Represent JobDetails."""
+    """Detailed information about a transcription job."""
 
     id: str
     created_at: datetime
@@ -331,10 +390,15 @@ class JobDetails(BaseModel):
 
 
 class Speechmatics(metaclass=Singleton):
-    """Represent Speechmatics."""
+    """Singleton client for the Speechmatics ASR API."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        """Initialize the instance."""
+        """
+        Initialize Speechmatics client with API key.
+
+        Args:
+            api_key: Speechmatics API key. Defaults to SPEECHMATICS_API_KEY env var.
+        """
         self.base_url = "https://asr.api.speechmatics.com/v2"
         self.api_key = api_key or os.getenv("SPEECHMATICS_API_KEY")
         self.headers = {"Authorization": f"Bearer {self.api_key}"}
@@ -351,7 +415,21 @@ class Speechmatics(metaclass=Singleton):
         enhanced: bool = True,
         **kwargs: object,
     ) -> str:
-        """Run create transcribe job."""
+        """
+        Create a new transcription job on Speechmatics.
+
+        Args:
+            video_url: URL of the media file to transcribe.
+            webhook_url: Optional webhook URL for job completion notification.
+            secret_token: Optional secret token for webhook authentication.
+            diarization: Whether to enable speaker diarization.
+            language: Language code for transcription. Defaults to 'auto'.
+            enhanced: Whether to use enhanced operating point.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            The created job ID.
+        """
         conf: dict = {
             "type": "transcription",
             "audio_events_config": {"types": ["laughter", "music", "applause"]},
@@ -389,7 +467,16 @@ class Speechmatics(metaclass=Singleton):
 
     @basic.retry_execution(delay=5, attempts=3)
     async def get_transcribe_job(self, job_id: str, **kwargs: object) -> JobDetails:
-        """Run get transcribe job."""
+        """
+        Get the details of a transcription job.
+
+        Args:
+            job_id: The job ID to retrieve.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            JobDetails object with job status and configuration.
+        """
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 url=f"{self.base_url}/jobs/{job_id}",
@@ -402,7 +489,16 @@ class Speechmatics(metaclass=Singleton):
     async def get_transcript(
         self, job_id: str, **kwargs: object
     ) -> TranscribeWebhookSchema:
-        """Run get transcript."""
+        """
+        Get the full transcript for a completed transcription job.
+
+        Args:
+            job_id: The job ID to retrieve transcript for.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            TranscribeWebhookSchema containing the full transcription results.
+        """
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 url=f"{self.base_url}/jobs/{job_id}/transcript",
@@ -415,11 +511,22 @@ class Speechmatics(metaclass=Singleton):
 def transcript_to_sequence(
     transcript: list[TranscriptionResult],
 ) -> tuple[list[list[float]], list[str], list[str]]:
+    """
+    Convert a Speechmatics transcript to sentence sequences with timings.
+
+    Args:
+        transcript: List of TranscriptionResult objects from Speechmatics API.
+
+    Returns:
+        Tuple of (timings, sentences, languages) where timings is a list of
+        [start, end] pairs, sentences is a list of text strings, and
+        languages is a list of detected language codes.
+    """
     # This function takes in a Speechmatics transcript object returned by
     # the Speechmatics API, which is a list of TranscriptionResult objects
     # and extracts a pair of lists, timings and sentences, that includes
     # sentences and their corresponding time-ranges.
-    """Run transcript to sequence."""
+
     sentences = []
     sen = []
     timings = []
@@ -445,8 +552,18 @@ def transcript_to_sequence(
 
 
 def generate_srt(timings: list[list[float]], sentence_seq: list[str]) -> str:
+    """
+    Generate SRT subtitle format from timings and sentences.
+
+    Args:
+        timings: List of [start, end] time pairs in seconds.
+        sentence_seq: List of sentence strings.
+
+    Returns:
+        SRT-formatted subtitle string.
+    """
+
     # Function to convert time in seconds to SRT format
-    """Run generate srt."""
     def convert_time(seconds: float) -> str:
         time_delta = timedelta(seconds=seconds)
         hours, remainder = divmod(time_delta.seconds, 3600)
@@ -468,17 +585,41 @@ def generate_srt(timings: list[list[float]], sentence_seq: list[str]) -> str:
 
 
 def transcription_to_srt(transcript: list[TranscriptionResult]) -> str:
-    """Run transcription to srt."""
+    """
+    Convert a Speechmatics transcript to SRT subtitle format.
+
+    Args:
+        transcript: List of TranscriptionResult objects.
+
+    Returns:
+        SRT-formatted subtitle string.
+    """
     timings, sentences, _ = transcript_to_sequence(transcript)
     return generate_srt(timings, sentences)
 
 
 def transcription_to_text(transcript: list[TranscriptionResult]) -> str:
-    """Run transcription to text."""
+    """
+    Convert a Speechmatics transcript to plain text.
+
+    Args:
+        transcript: List of TranscriptionResult objects.
+
+    Returns:
+        Plain text string with sentences joined by newlines.
+    """
     _, sentences, _ = transcript_to_sequence(transcript)
     return "\n".join(sentences)
 
 
 def transcription_to_json(transcript: list[TranscriptionResult]) -> str:
-    """Run transcription to json."""
+    """
+    Convert a Speechmatics transcript to JSON string.
+
+    Args:
+        transcript: List of TranscriptionResult objects.
+
+    Returns:
+        JSON string representation of the transcript.
+    """
     return json.dumps(transcript)

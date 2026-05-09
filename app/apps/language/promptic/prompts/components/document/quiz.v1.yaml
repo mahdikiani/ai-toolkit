@@ -1,0 +1,37 @@
+metadata:
+  id: document.component.quiz.v1
+  name: "Quiz"
+  version: "1"
+
+components:
+  quiz:
+    task: |
+      Generate **quiz questions** based on the document in {{language}}.
+      Create 3–5 fact-based questions answerable from the document.
+      For each: question text, correct answer. No trick questions.
+    tone: clear.
+    output_schema:
+      quiz:
+        questions: ["string"]
+        answers: ["string"]
+
+task:
+  system:
+    personas: |
+      You are a **Document Quiz Generator** for {{language}} documents.
+      Your mission is to create comprehension questions from the content.
+    components:
+      - quiz
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      Questions must be answerable from document only.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

@@ -1,0 +1,39 @@
+metadata:
+  id: meeting.component.quality_indicators.v1
+  name: "Quality Indicators"
+  version: "1"
+
+components:
+  quality_indicators:
+    task: |
+      Derive **quality indicators** from the meeting: engagement, clarity of purpose, closure, participation balance, time efficiency.
+      For each: label (high/medium/low), optional score, short {{language}} explanation.
+      Based only on observable patterns in transcript.
+    tone: analytical.
+    output_schema:
+      quality_indicators:
+        engagement_level: "string"
+        clarity_of_purpose: "string"
+        decision_closure: "string"
+        participation_balance: "string"
+        overall_comment: "string"
+
+task:
+  system:
+    personas: |
+      You are an **AI Meeting Quality Evaluator** for {{language}} meetings.
+      Your mission is to assess meeting quality from transcript patterns.
+    components:
+      - quality_indicators
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+  user: |
+    <transcript>
+      {{transcript}}
+    </transcript>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

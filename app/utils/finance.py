@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Financial utilities for quota management and usage metering via uFaaS."""
+
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from decimal import Decimal
@@ -15,7 +16,12 @@ resource_variant = getattr(Settings, "UFAAS_RESOURCE_VARIANT", "")
 
 @asynccontextmanager
 async def get_ufaas_client() -> AsyncGenerator[httpx.AsyncClient]:
-    """Run get ufaas client."""
+    """
+    Create an async HTTP client configured for the uFaaS API.
+
+    Yields:
+        Configured httpx.AsyncClient for uFaaS API calls.
+    """
     async with httpx.AsyncClient(
         base_url=Settings.finance_base_url or "https://saas.uln.me/api/saas/v1/",
         headers={"x-api-key": Settings.finance_api_key or ""},
@@ -26,7 +32,17 @@ async def get_ufaas_client() -> AsyncGenerator[httpx.AsyncClient]:
 async def meter_cost(
     user_id: str, amount: float, meta_data: dict | None = None
 ) -> UsageSchema:
-    """Run meter cost."""
+    """
+    Record usage cost for a user.
+
+    Args:
+        user_id: The user's unique identifier.
+        amount: The cost amount to meter.
+        meta_data: Optional metadata to attach to the usage record.
+
+    Returns:
+        The created usage record schema.
+    """
     if not Settings.finance_api_key:
         return None
     async with get_ufaas_client() as ufaas_client:
@@ -46,7 +62,15 @@ async def meter_cost(
 
 
 async def get_quota(user_id: str) -> Decimal:
-    """Run get quota."""
+    """
+    Retrieve the remaining quota for a user.
+
+    Args:
+        user_id: The user's unique identifier.
+
+    Returns:
+        The user's remaining quota, or infinity if finance is disabled.
+    """
     if not Settings.finance_api_key:
         return Decimal("inf")
     async with get_ufaas_client() as ufaas_client:
@@ -60,7 +84,12 @@ async def get_quota(user_id: str) -> Decimal:
 
 
 async def cancel_usage(usage_id: str) -> None:
-    """Run cancel usage."""
+    """
+    Cancel a previously recorded usage.
+
+    Args:
+        usage_id: The ID of the usage record to cancel.
+    """
     if usage_id is None:
         return
 
@@ -74,7 +103,20 @@ async def cancel_usage(usage_id: str) -> None:
 async def check_quota(
     user_id: str, coin: float, *, raise_exception: bool = True
 ) -> Decimal:
-    """Run check quota."""
+    """
+    Check if a user has sufficient quota.
+
+    Args:
+        user_id: The user's unique identifier.
+        coin: The required coin amount.
+        raise_exception: Whether to raise an exception on insufficient funds.
+
+    Returns:
+        The user's current quota.
+
+    Raises:
+        InsufficientFundsError: If quota is insufficient and raise_exception is True.
+    """
     quota = await get_quota(user_id)
     if raise_exception and (quota is None or quota < coin):
         raise exceptions.InsufficientFundsError(

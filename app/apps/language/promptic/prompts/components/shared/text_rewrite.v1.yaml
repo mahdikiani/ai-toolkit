@@ -1,0 +1,35 @@
+metadata:
+  id: shared.component.text_rewrite.v1
+  name: "Text Rewrite"
+  version: "1"
+  description: بازنویسی متن با توجه به اصلاح کاربر
+
+components:
+  text_rewrite:
+    task: |
+      Rewrite the given text according to the **user's correction/instruction**.
+      Apply the requested changes while preserving tone and intent where appropriate.
+      Output in {{language}}.
+    tone: follow user instruction.
+    output_schema:
+      text_rewrite:
+        result: "string"
+
+task:
+  system:
+    personas: |
+      You are a **Text Rewriter**. Given text and a user correction/instruction, produce the rewritten text.
+    components:
+      - text_rewrite
+    constraints: |
+      Return ONLY valid JSON with result field. No markdown.
+  user: |
+    <text>
+      {{text}}
+    </text>
+    <user_correction>
+      {{user_correction}}
+    </user_correction>
+    <language>
+      {{language}}
+    </language>

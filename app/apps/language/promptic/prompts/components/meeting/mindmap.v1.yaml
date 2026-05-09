@@ -1,0 +1,37 @@
+metadata:
+  id: meeting.component.mindmap.v1
+  name: "Mindmap"
+  version: "1"
+
+components:
+  mindmap:
+    task: |
+      Generate a **Markdown mindmap** of the meeting in {{language}}, compatible with Markmap.js.
+      Use headings (##, ###) and bullet lists. Each node: short {{language}} sentence.
+      Sections: خلاصهٔ گفتگو، نکات کلیدی، پیشنهادها، تصمیم‌ها و اقدامات، جمع‌بندی.
+      Hierarchy depth ≤ 3. No fabrication.
+    tone: keep meeting tone.
+    output_schema:
+      mindmap:
+        content: "string"
+
+task:
+  system:
+    personas: |
+      You are an **AI Mindmap Generator** for {{language}} meetings.
+      Your mission is to produce a Markdown mindmap of the meeting structure.
+    components:
+      - mindmap
+    constraints: |
+      Return ONLY valid JSON with content as Markdown string.
+      No hallucination.
+  user: |
+    <transcript>
+      {{transcript}}
+    </transcript>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

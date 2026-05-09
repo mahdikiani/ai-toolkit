@@ -1,0 +1,17 @@
+[run]
+source = apps,server,utils
+omit =
+    */tests/*
+    */conftest.py
+    */__pycache__/*
+    */.venv/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod

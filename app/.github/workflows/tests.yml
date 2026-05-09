@@ -1,0 +1,57 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'ai-toolkit/app/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'ai-toolkit/app/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-toolkit/app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run unit tests
+        run: uv run pytest -m unit --cov=apps --cov=utils --cov-report=xml -v
+        env:
+          HYPOTHESIS_PROFILE: ci
+
+      - name: Run integration tests
+        run: uv run pytest -m integration --cov=apps --cov=utils --cov-append --cov-report=xml -v
+
+      - name: Run property tests
+        run: uv run pytest -m property --hypothesis-show-statistics -v
+        env:
+          HYPOTHESIS_PROFILE: ci
+
+      - name: Generate coverage report
+        run: uv run pytest --cov=apps --cov=server --cov=utils --cov-report=html --cov-report=term-missing --cov-fail-under=80
+        env:
+          HYPOTHESIS_PROFILE: ci
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: ai-toolkit/app/htmlcov/

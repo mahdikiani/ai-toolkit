@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""MIME type detection utilities using libmagic."""
+
 from io import BytesIO
 from pathlib import Path
 

@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Application entry point with graceful shutdown support."""
+
 import asyncio
 import logging
 import signal
@@ -13,7 +14,6 @@ __all__ = ["app"]
 
 
 async def main() -> None:
-    """Run main."""
     module = Path(__file__).stem
     config = uvicorn.Config(
         f"{module}:app",

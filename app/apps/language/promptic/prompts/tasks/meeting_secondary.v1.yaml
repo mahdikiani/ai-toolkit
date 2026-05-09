@@ -1,0 +1,38 @@
+metadata:
+  id: task.meeting_secondary.v1
+  name: "Meeting Secondary (Stage 2)"
+  version: "1"
+  description: |
+    مرحله دوم جلسه: موضوعات/تصمیمات/تسک‌ها، واژه‌نامه، خلاصه تفصیلی.
+    inputs: متن جلسه، اطلاعات تکمیلی، متادیتا، موجودیت‌های استخراج‌شده، خروجی مرحله اول
+
+components:
+  topics_decisions_tasks:
+    file: "../components/meeting/topics_decisions_tasks.v1.yaml#topics_decisions_tasks"
+  glossary:
+    file: "../components/meeting/glossary.v1.yaml#glossary"
+  detailed_summary:
+    file: "../components/meeting/detailed_summary.v1.yaml#detailed_summary"
+
+task:
+  system:
+    personas: |
+      You are an **AI Meeting Secondary Extractor** for {{language}} meetings.
+      Your mission is to extract topics with nested decisions/tasks, glossary, and detailed summary.
+    components:
+      - topics_decisions_tasks
+      - glossary
+      - detailed_summary
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      Use only transcript evidence.
+  user: |
+    <transcript>
+      {{transcript}}
+    </transcript>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

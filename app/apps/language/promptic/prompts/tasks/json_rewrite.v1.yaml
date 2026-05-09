@@ -1,0 +1,30 @@
+metadata:
+  id: task.json_rewrite.v1
+  name: "JSON Rewrite"
+  version: "1"
+  description: |
+    بازنویسی JSON یک کامپوننت: JSON خراب + ساختار هدف (اختیاری) → JSON معتبر.
+    inputs: json خراب، ساختار json (اختیاری)
+
+components:
+  json_rewrite:
+    file: "../components/shared/json_rewrite.v1.yaml#json_rewrite"
+
+task:
+  system:
+    personas: |
+      You are a **JSON Repair Specialist**. Fix broken JSON; optionally conform to target schema.
+    components:
+      - json_rewrite
+    constraints: |
+      Return ONLY valid JSON.
+  user: |
+    <broken_json>
+      {{broken_json}}
+    </broken_json>
+    <target_schema>
+      {{target_schema}}
+    </target_schema>
+    <language>
+      {{language}}
+    </language>

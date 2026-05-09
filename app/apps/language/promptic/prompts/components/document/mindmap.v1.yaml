@@ -1,0 +1,35 @@
+metadata:
+  id: document.component.mindmap.v1
+  name: "Mindmap"
+  version: "1"
+
+components:
+  mindmap:
+    task: |
+      Produce a **Markdown mindmap** of the document in {{language}}, compatible with Markmap.js.
+      Structure: top-level subject, main sections/themes, sub-points.
+      Use headings and bullet lists. Short, informative node labels.
+    tone: structured.
+    output_schema:
+      mindmap:
+        content: "string"
+
+task:
+  system:
+    personas: |
+      You are a **Document Mindmap Generator** for {{language}} documents.
+      Your mission is to produce a hierarchical mindmap of the structure.
+    components:
+      - mindmap
+    constraints: |
+      Return ONLY valid JSON with content as Markdown string.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

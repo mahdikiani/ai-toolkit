@@ -3,6 +3,7 @@
 import dataclasses
 import os
 from pathlib import Path
+from typing import ClassVar
 
 import dotenv
 from fastapi_mongo_base.core import config
@@ -16,6 +17,9 @@ class Settings(config.Settings):
 
     project_name: str = os.getenv("PROJECT_NAME", "pishrun ai")
     base_dir: Path = Path(__file__).resolve().parent.parent
+    prompts_dir: ClassVar[Path] = (
+        Path(__file__).resolve().parent.parent / "apps" / "executions" / "prompts"
+    )
     base_path: str = "/api/ai/v1"
     storage_path: str = os.getenv("STORAGE_PATH", str(base_dir / "storage"))
 
@@ -27,17 +31,15 @@ class Settings(config.Settings):
     media_api_key: str | None = os.getenv("MEDIA_API_KEY")
     media_base_url: str | None = os.getenv("MEDIA_BASE_URL")
 
-    gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
-    metis_api_key: str | None = os.getenv("METIS_API_KEY")
-    pishrun_api_key: str | None = os.getenv("PISHRUN_API_KEY")
-    dify_api_key: str | None = os.getenv("DIFY_API_KEY")
     openrouter_api_key: str | None = os.getenv("OPENROUTER_API_KEY")
+    openrouter_base_url: str = os.getenv(
+        "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
+    )
+    default_model: str = os.getenv("DEFAULT_MODEL", "openai/gpt-4o-mini")
     soniox_api_key: str | None = os.getenv("SONIOX_API_KEY")
 
-    ocr_engine: str = os.getenv("OCR_ENGINE", "openrouter")
-    paddle_pipeline_name: str = os.getenv(
-        "PADDLE_PIPELINE_NAME", "PaddleOCR-VL-1.5"
-    )
+    ocr_engine: str = os.getenv("OCR_ENGINE", "llm")
+    paddle_pipeline_name: str = os.getenv("PADDLE_PIPELINE_NAME", "PaddleOCR-VL-1.5")
     paddle_device: str = os.getenv("PADDLE_DEVICE", "cpu")
 
     minutes_price: float = float(os.getenv("MINUTES_PRICE", 1))
@@ -70,7 +72,12 @@ class Settings(config.Settings):
 
     @classmethod
     def get_log_config(cls, console_level: str = "INFO", **kwargs: object) -> dict:
-        """Run get log config."""
+        """Return logging configuration dictionary."""
+        # Use absolute path for log file
+        log_file_path = cls.base_dir / "logs" / "app.log"
+        # Ensure logs directory exists
+        log_file_path.parent.mkdir(parents=True, exist_ok=True)
+
         log_config = {
             "formatters": {
                 "standard": {
@@ -88,7 +95,7 @@ class Settings(config.Settings):
                     "class": "logging.FileHandler",
                     "level": "INFO",
                     "formatter": "standard",
-                    "filename": "logs/app.log",
+                    "filename": str(log_file_path),
                 },
             },
             "loggers": {

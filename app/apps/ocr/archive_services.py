@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Services for processing compressed archives for OCR."""
+
 import logging
 import shutil
 from io import BytesIO

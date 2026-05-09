@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""OCR task processing services."""
+
 import logging
 
 from fastapi_mongo_base.tasks import TaskStatusEnum
@@ -15,9 +16,11 @@ from .models import OcrTask
 from .no_ocr_services import process_direct_file
 from .ocr_services import prepare_pages, process_pages_batch
 from .paddle_ocr_services import process_pages_with_paddle
+from .schemas import OcrEngineType
 
 
-def _resolve_ocr_engine(task: OcrTask) -> str:
+def _resolve_ocr_engine(task: OcrTask) -> OcrEngineType:
+    """Resolve the OCR engine type from task configuration."""
     engine = (task.ocr_engine or Settings.ocr_engine or "llm").lower().strip()
     aliases = {
         "paddle": "paddleocr_vl_1_5",
@@ -26,11 +29,11 @@ def _resolve_ocr_engine(task: OcrTask) -> str:
         "paddleocr_vl_1_5": "paddleocr_vl_1_5",
         "paddleocr-vl-1.5": "paddleocr_vl_1_5",
     }
-    return aliases.get(engine, "llm")
+    return OcrEngineType(aliases.get(engine, "llm"))
 
 
 async def process_ocr(task: OcrTask) -> OcrTask:
-    """Process OCR for a task."""
+    """Process an OCR task and extract text from the uploaded file."""
     try:
         file_content = await task.file_content()
         file_type = mime.check_file_type(file_content)

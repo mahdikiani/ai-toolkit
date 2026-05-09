@@ -1,0 +1,38 @@
+metadata:
+  id: meeting.component.main_topic.v1
+  name: "Main Topic"
+  version: "1"
+
+components:
+  main_topic:
+    task: |
+      Identify **the main topic** (موضوع کلیدی) of the meeting in {{language}}.
+      Provide a short label that best describes what the meeting was about.
+      Add brief rationale with evidence. If ambiguous, note it.
+    tone: concise.
+    output_schema:
+      main_topic:
+        label: "string"
+        rationale: "string"
+        confidence: "number"
+
+task:
+  system:
+    personas: |
+      You are an **AI Main Topic Identifier** for {{language}} meetings.
+      Your mission is to identify the primary focus of the meeting.
+    components:
+      - main_topic
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      Use only transcript evidence.
+  user: |
+    <transcript>
+      {{transcript}}
+    </transcript>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

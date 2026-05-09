@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Dify API client utilities for file upload, chat, and OCR."""
+
 import logging
 import mimetypes
 import os
@@ -10,10 +11,18 @@ from PIL import Image
 
 
 class DifyClient(httpx.Client):
-    """Represent DifyClient."""
+    """Synchronous HTTP client for the Dify API."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        """Initialize the instance."""
+        """
+        Initialize DifyClient with API key.
+
+        Args:
+            api_key: Dify API key. Defaults to DIFY_API_KEY environment variable.
+
+        Raises:
+            ValueError: If no API key is provided or found in environment.
+        """
         api_key = api_key or os.getenv("DIFY_API_KEY", "")
         if not api_key or not api_key.strip():
             raise ValueError("DIFY_API_KEY environment variable is not set")
@@ -26,7 +35,15 @@ class DifyClient(httpx.Client):
         )
 
     def upload_file(self, file: Path | str) -> str:
-        """Run upload file."""
+        """
+        Upload a file to Dify and return the file ID.
+
+        Args:
+            file: Path to the file to upload.
+
+        Returns:
+            The uploaded file ID from Dify.
+        """
         if isinstance(file, str):
             file = Path(file)
         with open(file, "rb") as f:
@@ -37,7 +54,15 @@ class DifyClient(httpx.Client):
             return response.json().get("id")
 
     def upload_image(self, image: Image.Image) -> str:
-        """Run upload image."""
+        """
+        Upload a PIL Image to Dify and return the file ID.
+
+        Args:
+            image: PIL Image to upload.
+
+        Returns:
+            The uploaded image file ID from Dify.
+        """
         with BytesIO() as output:
             image.save(output, format="jpeg")
             output.seek(0)
@@ -48,7 +73,16 @@ class DifyClient(httpx.Client):
             return response.json().get("id")
 
     def chat_messages(self, prompt: str, file_id: str | None = None) -> str:
-        """Run chat messages."""
+        """
+        Send a chat message to Dify and get the response.
+
+        Args:
+            prompt: The user's message text.
+            file_id: Optional file ID to attach to the message.
+
+        Returns:
+            The answer text from Dify.
+        """
         json_data = {
             "inputs": {},
             "query": prompt,
@@ -70,7 +104,15 @@ class DifyClient(httpx.Client):
         return response.json().get("answer")
 
     def ocr_image(self, file: Path | str | Image.Image) -> str:
-        """Run ocr image."""
+        """
+        Perform OCR on an image file using Dify.
+
+        Args:
+            file: Path to image file or PIL Image.
+
+        Returns:
+            The extracted text from the image.
+        """
         if isinstance(file, Image.Image):
             file_id = self.upload_image(file)
         else:
@@ -79,10 +121,18 @@ class DifyClient(httpx.Client):
 
 
 class AsyncDifyClient(httpx.AsyncClient):
-    """Represent AsyncDifyClient."""
+    """Asynchronous HTTP client for the Dify API."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        """Initialize the instance."""
+        """
+        Initialize AsyncDifyClient with API key.
+
+        Args:
+            api_key: Dify API key. Defaults to DIFY_API_KEY environment variable.
+
+        Raises:
+            ValueError: If no API key is provided or found in environment.
+        """
         api_key = api_key or os.getenv("DIFY_API_KEY", "")
         if not api_key or not api_key.strip():
             raise ValueError("DIFY_API_KEY environment variable is not set")
@@ -94,7 +144,15 @@ class AsyncDifyClient(httpx.AsyncClient):
         )
 
     async def upload_file(self, file: Path | str) -> str:
-        """Run upload file."""
+        """
+        Upload a file to Dify and return the file ID.
+
+        Args:
+            file: Path to the file to upload.
+
+        Returns:
+            The uploaded file ID from Dify.
+        """
         import aiofiles
 
         if isinstance(file, str):
@@ -107,14 +165,30 @@ class AsyncDifyClient(httpx.AsyncClient):
             return response.json().get("id")
 
     async def upload_image(self, image: Image.Image) -> str:
-        """Run upload image."""
+        """
+        Upload a PIL Image to Dify and return the file ID.
+
+        Args:
+            image: PIL Image to upload.
+
+        Returns:
+            The uploaded image file ID from Dify.
+        """
         with BytesIO() as output:
             image.save(output, format="jpeg")
             output.seek(0)
             return await self.upload_file_bytes(output)
 
     async def upload_file_bytes(self, file: BytesIO) -> str:
-        """Run upload file bytes."""
+        """
+        Upload file bytes to Dify and return the file ID.
+
+        Args:
+            file: BytesIO object containing file data.
+
+        Returns:
+            The uploaded file ID from Dify.
+        """
         file.seek(0)
         files = {"file": ("image.jpg", file.read(), "image/jpeg")}
         payload = {"user": "me"}
@@ -123,7 +197,16 @@ class AsyncDifyClient(httpx.AsyncClient):
         return response.json().get("id")
 
     async def chat_messages(self, prompt: str, file_id: str | None = None) -> str:
-        """Run chat messages."""
+        """
+        Send a chat message to Dify and get the response.
+
+        Args:
+            prompt: The user's message text.
+            file_id: Optional file ID to attach to the message.
+
+        Returns:
+            The answer text from Dify.
+        """
         json_data = {
             "inputs": {},
             "query": prompt,
@@ -145,7 +228,15 @@ class AsyncDifyClient(httpx.AsyncClient):
         return response.json().get("answer")
 
     async def translate(self, prompt: str) -> str:
-        """Run translate."""
+        """
+        Send a translation request to Dify.
+
+        Args:
+            prompt: The text to translate.
+
+        Returns:
+            The translated text from Dify.
+        """
         json_data = {
             "inputs": {},
             "query": prompt,
@@ -158,7 +249,15 @@ class AsyncDifyClient(httpx.AsyncClient):
         return response.json().get("answer")
 
     async def ocr_image(self, file: Path | str | Image.Image | BytesIO) -> str:
-        """Run ocr image."""
+        """
+        Perform OCR on an image file using Dify.
+
+        Args:
+            file: Path to image file, PIL Image, or BytesIO.
+
+        Returns:
+            The extracted text from the image.
+        """
         if isinstance(file, Image.Image):
             file_id = await self.upload_image(file)
         elif isinstance(file, BytesIO):

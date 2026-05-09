@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""OCR API routes for task management and file uploads."""
+
 import base64
 from io import BytesIO
 
@@ -22,13 +23,13 @@ from .schemas import OcrTaskSchema, OcrTaskSchemaCreate, OcrTaskUploadFormSchema
 
 
 class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
-    """Represent OCRRouter."""
+    """Router for OCR task management endpoints."""
 
     model = OcrTask
     schema = OcrTaskSchema
 
     def __init__(self) -> None:
-        """Initialize the instance."""
+        """Initialize the OCR router with authentication and configuration."""
         super().__init__(
             user_dependency=USSOAuthentication(),
             draftable=False,
@@ -37,7 +38,7 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         )
 
     def config_routes(self, **kwargs: object) -> None:
-        """Run config routes."""
+        """Configure OCR-specific API routes."""
         super().config_routes(update_route=False, **kwargs)
         self.router.add_api_route(
             "/{uid:str}/start",
@@ -63,7 +64,7 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         limit: int = Query(10, ge=1, le=Settings.page_max_limit),
         user_id: str | None = None,
     ) -> PaginatedResponse[OcrTaskSchema]:
-        """Run list items."""
+        """List OCR tasks with pagination."""
         return await self._list_items(request, offset, limit, user_id=user_id)
 
     async def create_item(
@@ -73,7 +74,7 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         background_tasks: BackgroundTasks,
         blocking: bool = False,
     ) -> OcrTask:
-        """Run create item."""
+        """Create a new OCR task from a file URL."""
         user = await self.get_user(request)
         data.user_id = data.user_id or user.user_id
         if data.user_id != user.user_id:
@@ -93,7 +94,7 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         return item
 
     async def get_result(self, request: Request, uid: str):  # noqa: ANN201
-        """Run get result."""
+        """Retrieve the result of a completed OCR task."""
         task: OcrTask = await self.retrieve_item(request, uid)
 
         # Assuming the OCR result is stored in task.result or similar
@@ -117,7 +118,7 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         data_form: OcrTaskUploadFormSchema = Depends(OcrTaskUploadFormSchema.as_form),
         blocking: bool = Query(False),
     ) -> OcrTask:
-        """Run create item with upload."""
+        """Create an OCR task by directly uploading a file."""
         file_content = await file.read()
         encoded_file = base64.b64encode(file_content).decode("utf-8")
         mime_type = file.content_type or "application/octet-stream"

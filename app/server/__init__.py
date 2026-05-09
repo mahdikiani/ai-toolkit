@@ -1,1 +1,1 @@
-"""Initialize package."""
+"""Server configuration and application package."""

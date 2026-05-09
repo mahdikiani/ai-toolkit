@@ -1,0 +1,62 @@
+metadata:
+  id: task.meeting_report.v1
+  name: "Meeting Report (Full)"
+  version: "1"
+  description: |
+    ساخت گزارش کامل از جلسه: چکیده، محورها، نتایج، شاخص‌ها، نقشه ذهنی، خلاصه روایی، موضوعات/تصمیمات/تسک، ابر کلمات، تعاملات، کوییز، SWOT.
+    inputs: متن جلسه، خروجی مراحل ۱ و ۲، موجودیت‌ها
+
+components:
+  abstract:
+    file: "../components/meeting/abstract.v1.yaml#abstract"
+  main_topic:
+    file: "../components/meeting/main_topic.v1.yaml#main_topic"
+  key_results:
+    file: "../components/meeting/key_results.v1.yaml#key_results"
+  quality_indicators:
+    file: "../components/meeting/quality_indicators.v1.yaml#quality_indicators"
+  mindmap:
+    file: "../components/meeting/mindmap.v1.yaml#mindmap"
+  summary:
+    file: "../components/meeting/summary.v1.yaml#summary"
+  topics_decisions_tasks:
+    file: "../components/meeting/topics_decisions_tasks.v1.yaml#topics_decisions_tasks"
+  keyword_cloud:
+    file: "../components/meeting/keyword_cloud.v1.yaml#keyword_cloud"
+  social_dynamics:
+    file: "../components/meeting/social_dynamics.v1.yaml#social_dynamics"
+  quiz:
+    file: "../components/meeting/quiz.v1.yaml#quiz"
+  swot:
+    file: "../components/meeting/swot.v1.yaml#swot"
+
+task:
+  system:
+    personas: |
+      You are an **AI Meeting Report Builder** for {{language}} meetings.
+      Your mission is to produce a comprehensive report: abstract, topics, results, quality indicators, mindmap, narrative summary, decisions/tasks, keyword cloud, social dynamics, quiz, SWOT.
+    components:
+      - abstract
+      - main_topic
+      - key_results
+      - quality_indicators
+      - mindmap
+      - summary
+      - topics_decisions_tasks
+      - keyword_cloud
+      - social_dynamics
+      - quiz
+      - swot
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      Use only transcript evidence.
+  user: |
+    <transcript>
+      {{transcript}}
+    </transcript>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

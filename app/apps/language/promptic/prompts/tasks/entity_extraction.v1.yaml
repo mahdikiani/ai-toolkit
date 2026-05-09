@@ -1,0 +1,34 @@
+metadata:
+  id: task.entity_extraction.v1
+  name: "Entity Extraction"
+  version: "1"
+  description: |
+    استخراج موجودیت: لیست موجودیت‌ها (people, orgs) و لیست اسناد/جلسات مرتبط.
+    inputs: متن اصلی (جلسه یا سند)، اطلاعات تکمیلی، متادیتا
+
+components:
+  entities:
+    file: "../components/shared/entity_extraction.v1.yaml#entities"
+  related_documents:
+    file: "../components/shared/entity_extraction.v1.yaml#related_documents"
+
+task:
+  system:
+    personas: |
+      You are an **Entity & Reference Extractor** for {{language}} text (meeting or document).
+      Extract entities (people, organizations) and related document/meeting references.
+    components:
+      - entities
+      - related_documents
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+  user: |
+    <text>
+      {{text}}
+    </text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

@@ -1,0 +1,30 @@
+metadata:
+  id: task.text_rewrite.v1
+  name: "Text Rewrite"
+  version: "1"
+  description: |
+    بازنویسی متن: متن + اصلاح کاربر → متن بازنویسی‌شده.
+    inputs: متن خراب، اصلاح/توضیح کاربر
+
+components:
+  text_rewrite:
+    file: "../components/shared/text_rewrite.v1.yaml#text_rewrite"
+
+task:
+  system:
+    personas: |
+      You are a **Text Rewriter**. Apply user correction/instruction to the text.
+    components:
+      - text_rewrite
+    constraints: |
+      Return ONLY valid JSON with result field.
+  user: |
+    <text>
+      {{text}}
+    </text>
+    <user_correction>
+      {{user_correction}}
+    </user_correction>
+    <language>
+      {{language}}
+    </language>

@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Services for processing non-OCR file formats like DOCX and PPTX."""
+
 from io import BytesIO
 
 from utils import texttools

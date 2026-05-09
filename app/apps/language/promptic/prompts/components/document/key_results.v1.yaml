@@ -1,0 +1,35 @@
+metadata:
+  id: document.component.key_results.v1
+  name: "Key Results"
+  version: "1"
+
+components:
+  key_results:
+    task: |
+      Extract **key results and outcomes** from the document in {{language}}.
+      Identify: final decisions, granted rights, obligations, status changes.
+      For each: concise description, optional evidence. Focus on high-impact items.
+    tone: factual.
+    output_schema:
+      key_results:
+        results: ["string"]
+
+task:
+  system:
+    personas: |
+      You are a **Document Key Results Extractor** for {{language}} documents.
+      Your mission is to extract key outcomes and conclusions.
+    components:
+      - key_results
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

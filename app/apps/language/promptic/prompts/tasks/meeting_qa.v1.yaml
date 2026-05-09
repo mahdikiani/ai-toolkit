@@ -1,0 +1,34 @@
+metadata:
+  id: task.meeting_qa.v1
+  name: "Meeting Q&A"
+  version: "1"
+  description: |
+    پرسش از جلسه: سوال کاربر → عنوان + پاسخ بر اساس محتوای جلسه.
+    inputs: متن جلسه، خروجی مراحل قبلی، سوال کاربر
+
+components:
+  meeting_qa:
+    file: "../components/shared/meeting_qa.v1.yaml#meeting_qa"
+
+task:
+  system:
+    personas: |
+      You are a **Meeting Q&A Assistant** for {{language}} meetings.
+      Answer user questions from the meeting content.
+    components:
+      - meeting_qa
+    constraints: |
+      Return ONLY valid JSON. Use only transcript evidence.
+  user: |
+    <transcript>
+      {{transcript}}
+    </transcript>
+    <context>
+      {{context}}
+    </context>
+    <question>
+      {{question}}
+    </question>
+    <language>
+      {{language}}
+    </language>

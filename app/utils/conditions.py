@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Utilities for managing async conditions and synchronization primitives."""
+
 import asyncio
 from typing import ClassVar
 
@@ -6,7 +7,7 @@ from singleton import Singleton
 
 
 class Conditions(metaclass=Singleton):
-    """Represent Conditions."""
+    """Singleton manager for asyncio conditions keyed by unique identifiers."""
 
     _conditions: ClassVar[dict[str, asyncio.Condition]] = {}
 
@@ -17,11 +18,21 @@ class Conditions(metaclass=Singleton):
         return self._conditions[uid]
 
     def cleanup_condition(self, uid: str) -> None:
-        """Run cleanup condition."""
+        """
+        Remove and clean up the condition for the given identifier.
+
+        Args:
+            uid: Unique identifier for the condition.
+        """
         self._conditions.pop(uid, None)
 
     async def release_condition(self, uid: str) -> None:
-        """Run release condition."""
+        """
+        Notify all waiters on the condition and clean it up.
+
+        Args:
+            uid: Unique identifier for the condition.
+        """
         if uid not in self._conditions:
             return
 
@@ -31,7 +42,12 @@ class Conditions(metaclass=Singleton):
         self.cleanup_condition(uid)
 
     async def wait_condition(self, uid: str) -> None:
-        """Run wait condition."""
+        """
+        Wait on the condition for the given identifier until notified.
+
+        Args:
+            uid: Unique identifier for the condition.
+        """
         condition = self.get_condition(uid)
         async with condition:
             await condition.wait()

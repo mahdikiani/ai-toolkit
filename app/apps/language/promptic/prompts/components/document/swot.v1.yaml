@@ -1,0 +1,38 @@
+metadata:
+  id: document.component.swot.v1
+  name: "SWOT"
+  version: "1"
+
+components:
+  swot:
+    task: |
+      Extract **SWOT factors** from the document: strengths, weaknesses, opportunities, threats.
+      Base on content analysis. Each entry: 1–2 {{language}} sentences.
+    tone: factual, strategic.
+    output_schema:
+      swot:
+        strengths: ["string"]
+        weaknesses: ["string"]
+        opportunities: ["string"]
+        threats: ["string"]
+
+task:
+  system:
+    personas: |
+      You are a **Document SWOT Analyst** for {{language}} documents.
+      Your mission is to extract strategic SWOT factors from the content.
+    components:
+      - swot
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      Use only document evidence.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

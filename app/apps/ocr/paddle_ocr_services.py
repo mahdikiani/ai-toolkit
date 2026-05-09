@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""PaddleOCR services for local OCR processing."""
+
 import asyncio
 import logging
 import tempfile
@@ -11,6 +12,7 @@ from server.config import Settings
 
 @lru_cache(maxsize=1)
 def _get_pipeline() -> object:
+    """Get or create the PaddleOCR pipeline with caching."""
     import paddlex as pdx
 
     return pdx.create_pipeline(
@@ -20,6 +22,7 @@ def _get_pipeline() -> object:
 
 
 def _extract_text_payload(payload: object) -> str:
+    """Extract text content from PaddleOCR result payload."""
     if payload is None:
         return ""
     if isinstance(payload, dict):
@@ -44,6 +47,7 @@ def _extract_text_payload(payload: object) -> str:
 
 
 def _predict_single_image(page: BytesIO) -> str | None:
+    """Run OCR prediction on a single image page."""
     pipeline = _get_pipeline()
     page.seek(0)
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp_file:
@@ -66,7 +70,8 @@ def _predict_single_image(page: BytesIO) -> str | None:
 
 
 async def process_pages_with_paddle(pages: list[BytesIO]) -> list[str | None]:
-    """Run process pages with paddle."""
+    """Process multiple pages concurrently using PaddleOCR."""
+
     async def _run(page: BytesIO) -> str | None:
         try:
             return await asyncio.to_thread(_predict_single_image, page)

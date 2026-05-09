@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""OCR task schemas and data models."""
+
 import base64
 import binascii
 import json
@@ -13,14 +14,14 @@ from pydantic import BaseModel, Field
 
 
 class OcrEngineType(StrEnum):
-    """Represent OcrEngineType."""
+    """Supported OCR engine types."""
 
     llm = "llm"
     paddle = "paddle"
 
 
 class OcrTaskSchemaCreate(BaseModel):
-    """Represent OcrTaskSchemaCreate."""
+    """Schema for creating a new OCR task."""
 
     file_url: str = Field(
         min_length=1,
@@ -48,11 +49,11 @@ class OcrTaskSchemaCreate(BaseModel):
 
     @property
     def is_pdf(self) -> bool:
-        """Run is pdf."""
+        """Check if the file URL points to a PDF file."""
         return self.file_url.endswith(".pdf")
 
     async def file_content(self) -> BytesIO:
-        """Run file content."""
+        """Fetch and return file content from URL or data URL."""
         if hasattr(self, "_file_content"):
             return getattr(self, "_file_content", BytesIO())
 
@@ -74,13 +75,13 @@ class OcrTaskSchemaCreate(BaseModel):
             return self._file_content
 
     async def file_content_base64(self) -> str:
-        """Run file content base64."""
+        """Return file content encoded as base64 string."""
         content = await self.file_content()
         return base64.b64encode(content.getvalue()).decode("utf-8")
 
 
 class OcrTaskUploadFormSchema(BaseModel):
-    """Represent OcrTaskUploadFormSchema."""
+    """Schema for multipart form upload of OCR tasks."""
 
     user_id: str | None = None
     webhook_url: str | None = None
@@ -97,7 +98,7 @@ class OcrTaskUploadFormSchema(BaseModel):
         meta_data: str | None = Form(None),
         ocr_engine: str | None = Form(None),
     ) -> "OcrTaskUploadFormSchema":
-        """Run as form."""
+        """Parse form fields into a validated schema instance."""
         try:
             parsed_webhook_headers = (
                 json.loads(webhook_custom_headers) if webhook_custom_headers else None
@@ -119,7 +120,7 @@ class OcrTaskUploadFormSchema(BaseModel):
 
 
 class OcrTaskSchema(UserOwnedEntitySchema, TaskMixin, OcrTaskSchemaCreate):  # type: ignore[misc]
-    """Represent OcrTaskSchema."""
+    """Complete OCR task schema including result and usage fields."""
 
     result: str | None = None
     usage_amount: float | None = None
@@ -127,6 +128,6 @@ class OcrTaskSchema(UserOwnedEntitySchema, TaskMixin, OcrTaskSchemaCreate):  # t
 
     @property
     def webhook_exclude_fields(self) -> set[str]:
-        """Run webhook exclude fields."""
+        """Return fields to exclude from webhook payload."""
         return {}
         return {"result"}

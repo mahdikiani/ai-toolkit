@@ -1,0 +1,14 @@
+name: quick_answer
+model: openai/gpt-4o-mini
+temperature: 0.7
+max_tokens: 1024
+system: |
+  You are a concise, knowledgeable assistant.
+  Give direct, accurate answers without unnecessary preamble.
+  Always respond in {{ language | default('auto-detect') }}.
+
+  <context>
+  {{ context | default('') }}
+  </context>
+prompt: |
+  {{ question }}

@@ -1,0 +1,36 @@
+metadata:
+  id: document.component.keyword_cloud.v1
+  name: "Keyword Cloud"
+  version: "1"
+
+components:
+  keyword_cloud:
+    task: |
+      Extract **keywords and key phrases** from the document in {{language}}.
+      Include domain terms, significant phrases, semantic clusters.
+      Assign weight scores. Limit to 10–30 items.
+    tone: precise.
+    output_schema:
+      keyword_cloud:
+        keywords: ["string"]
+        weights: ["number"]
+
+task:
+  system:
+    personas: |
+      You are a **Document Keyword Extractor** for {{language}} documents.
+      Your mission is to extract weighted keywords representing the document content.
+    components:
+      - keyword_cloud
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

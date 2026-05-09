@@ -1,0 +1,36 @@
+metadata:
+  id: meeting.component.suggestions.v1
+  name: "Suggestions"
+  version: "1"
+
+components:
+  suggestions:
+    task: |
+      Extract **suggestions and recommendations** (پیشنهادات) made during the meeting in {{language}}.
+      Include: who suggested, what was suggested, context, and whether it was adopted or deferred.
+      Base only on transcript evidence.
+    tone: neutral, factual.
+    output_schema:
+      suggestions:
+        items: ["string"]
+
+task:
+  system:
+    personas: |
+      You are an **AI Suggestions Extractor** for {{language}} meetings.
+      Your mission is to capture recommendations and suggestions from the discussion.
+    components:
+      - suggestions
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      No hallucination; use only transcript evidence.
+  user: |
+    <transcript>
+      {{transcript}}
+    </transcript>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

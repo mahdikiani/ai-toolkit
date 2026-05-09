@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Test fixtures and configuration for ai-toolkit test suite."""
+
 import logging
 import os
 from collections.abc import AsyncGenerator, Generator
@@ -16,7 +17,7 @@ from server.server import app as fastapi_app
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_debugpy() -> None:
-    """Run setup debugpy."""
+    """Set up debugpy for remote debugging if enabled."""
     if os.getenv("DEBUGPY", "False").lower() in ("true", "1", "yes"):
         import debugpy  # noqa: T100
 
@@ -27,16 +28,15 @@ def setup_debugpy() -> None:
 
 @pytest.fixture(scope="session")
 def mongo_client() -> Generator[object]:
-    """Run mongo client."""
+    """Create a mock MongoDB client for testing."""
     from mongomock_motor import AsyncMongoMockClient
 
-    mongo_client: AsyncMongoMockClient = AsyncMongoMockClient()
-    yield mongo_client
+    client: AsyncMongoMockClient = AsyncMongoMockClient()
+    yield client
 
 
-# Async setup function to initialize the database with Beanie
 async def init_db(mongo_client: object) -> None:
-    """Run init db."""
+    """Initialize Beanie ORM with the test database."""
     database = mongo_client.get_database("test_db")  # type: ignore
     await init_beanie(
         database=database,  # type: ignore
@@ -46,18 +46,18 @@ async def init_db(mongo_client: object) -> None:
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def db(mongo_client: object) -> AsyncGenerator[None]:
-    """Run db."""
+    """Initialize and cleanup the test database."""
     Settings.config_logger()
-    logging.info("Initializing database")
+    logging.info("Initializing test database")
     await init_db(mongo_client)
-    logging.info("Database initialized")
+    logging.info("Test database initialized")
     yield
-    logging.info("Cleaning up database")
+    logging.info("Cleaning up test database")
 
 
 @pytest_asyncio.fixture(scope="session")
 async def client() -> AsyncGenerator[httpx.AsyncClient]:
-    """Fixture to provide an AsyncClient for FastAPI app."""
+    """Provide an AsyncClient for the FastAPI app."""
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=fastapi_app),
         base_url=f"https://test.uln.me{Settings.base_path}",
@@ -69,10 +69,21 @@ async def client() -> AsyncGenerator[httpx.AsyncClient]:
 async def authenticated_client(
     client: httpx.AsyncClient,
 ) -> AsyncGenerator[httpx.AsyncClient]:
-    """Run authenticated client."""
+    """Provide an authenticated HTTP client for testing."""
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=fastapi_app),
         base_url=client.base_url,
         headers={"x-api-key": os.getenv("API_KEY") or ""},
     ) as ac:
         yield ac
+
+
+@pytest.fixture
+def mock_user() -> dict:
+    """Provide a mock authenticated user."""
+    return {
+        "user_id": "test_user_123",
+        "uid": "test_user_123",
+        "tenant_id": "test_tenant_456",
+        "email": "test@example.com",
+    }

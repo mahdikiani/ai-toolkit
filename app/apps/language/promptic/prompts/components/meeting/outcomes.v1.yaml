@@ -1,0 +1,37 @@
+metadata:
+  id: meeting.component.outcomes.v1
+  name: "Outcomes"
+  version: "1"
+
+components:
+  outcomes:
+    task: |
+      Analyze the transcript to identify **outcomes** in {{language}}.
+      Extract: clear decisions, agreements, commitments, milestones, conclusions.
+      For each: short {{language}} description; optional evidence.
+      Focus on high-level outcomes.
+    tone: factual.
+    output_schema:
+      outcomes:
+        outcomes: ["string"]
+
+task:
+  system:
+    personas: |
+      You are an **AI Meeting Outcomes Extractor** for {{language}} meetings.
+      Your mission is to extract outcomes from the transcript.
+    components:
+      - outcomes
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      Never guess beyond transcript evidence.
+  user: |
+    <transcript>
+      {{transcript}}
+    </transcript>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

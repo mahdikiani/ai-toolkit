@@ -1,0 +1,36 @@
+metadata:
+  id: document.component.attachments.v1
+  name: "Attachments"
+  version: "1"
+
+components:
+  attachments:
+    task: |
+      Extract **attachments** (پیوست‌ها) mentioned in the document.
+      Identify explicit references to annexes, appendices, enclosures.
+      For each: short {{language}} label, identifier if present.
+    tone: factual.
+    output_schema:
+      attachments:
+        items: ["string"]
+
+task:
+  system:
+    personas: |
+      You are an **Attachments Extractor** for {{language}} documents.
+      Your mission is to identify document attachments and annexes.
+    components:
+      - attachments
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      Use only document evidence.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

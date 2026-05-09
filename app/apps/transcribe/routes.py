@@ -1,4 +1,5 @@
-"""Provide module functionality."""
+"""Transcribe API routes for audio transcription task management."""
+
 from io import BytesIO
 
 from fastapi import BackgroundTasks, Query, Request
@@ -17,13 +18,13 @@ from .schemas import TranscribeTaskSchema, TranscribeTaskSchemaCreate
 
 
 class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
-    """Represent TranscribeRouter."""
+    """Router for transcription task management endpoints."""
 
     model = TranscribeTask
     schema = TranscribeTaskSchema
 
     def __init__(self) -> None:
-        """Initialize the instance."""
+        """Initialize the transcribe router with authentication and configuration."""
         super().__init__(
             user_dependency=USSOAuthentication(),
             draftable=False,
@@ -32,14 +33,14 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
         )
 
     def config_routes(self, **kwargs: object) -> None:
-        """Run config routes."""
+        """Configure transcription-specific API routes."""
         super().config_routes(update_route=False, **kwargs)
-        # self.router.add_api_route(
-        #     "/{uid}/webhook",
-        #     self.webhook,
-        #     methods=["POST"],
-        #     status_code=200,
-        # )
+        self.router.add_api_route(
+            "/{uid}/webhook",
+            self.webhook,
+            methods=["POST"],
+            status_code=200,
+        )
         self.router.add_api_route(
             "/{uid}/webhook/{chunk_id}",
             self.webhook_chunk,
@@ -59,7 +60,7 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
         limit: int = Query(10, ge=1, le=Settings.page_max_limit),
         user_id: str | None = None,
     ) -> PaginatedResponse[TranscribeTaskSchema]:
-        """Run list items."""
+        """List transcription tasks with pagination."""
         return await self._list_items(request, offset, limit, user_id=user_id)
 
     async def create_item(
@@ -69,7 +70,7 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
         background_tasks: BackgroundTasks,
         blocking: bool = False,
     ) -> TranscribeTask:
-        """Run create item."""
+        """Create a new transcription task from a file URL."""
         user = await self.get_user(request)
         data.user_id = data.user_id or user.user_id
         if data.user_id != user.user_id:
@@ -88,7 +89,7 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
         return item
 
     async def get_result(self, request: Request, uid: str):  # noqa: ANN201
-        """Run get result."""
+        """Retrieve the result of a completed transcription task."""
         task: TranscribeTask = await self.retrieve_item(request, uid)
 
         # Assuming the OCR result is stored in task.result or similar
@@ -112,7 +113,7 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
         data: speechmatics.TranscribeWebhookSchema | TranscriptionWebhook | None = None,
         status: str | None = None,
     ) -> dict:
-        """Run webhook."""
+        """Handle transcription completion webhook."""
         item: TranscribeTask = await self.get_item(
             uid, user_id=None, ignore_user_id=True
         )
@@ -137,7 +138,7 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
         data: speechmatics.TranscribeWebhookSchema | TranscriptionWebhook | None = None,
         status: str | None = None,
     ) -> dict:
-        """Run webhook chunk."""
+        """Handle chunk transcription webhook."""
         item: TranscribeTask = await self.get_item(
             uid, user_id=None, ignore_user_id=True
         )

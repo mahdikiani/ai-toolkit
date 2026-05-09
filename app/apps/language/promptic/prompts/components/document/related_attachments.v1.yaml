@@ -1,0 +1,35 @@
+metadata:
+  id: document.component.related_attachments.v1
+  name: "Related Documents & Meetings"
+  version: "1"
+
+components:
+  related_attachments:
+    task: |
+      Extract **related documents and references** mentioned in the document (ضمیمه، پیوست، عطف به، قرارداد).
+      For each: short {{language}} label, identifier if present.
+    tone: factual.
+    output_schema:
+      related_attachments:
+        attachments: ["string"]
+        related_documents: ["string"]
+
+task:
+  system:
+    personas: |
+      You are a **Related Documents Extractor** for {{language}} documents.
+      Your mission is to find referenced documents and attachments.
+    components:
+      - related_attachments
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+  user: |
+    <document_text>
+      {{document_text}}
+    </document_text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

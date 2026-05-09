@@ -1,0 +1,38 @@
+metadata:
+  id: meeting.component.summary.v1
+  name: "Summary"
+  version: "1"
+
+components:
+  summary:
+    task: |
+      Generate a **narrative summary** (خلاصه روایی) of the meeting in {{language}}.
+      Cover: what happened, how discussion evolved, final state or outcome.
+      Capture who discussed what, decisions/agreements, overall tone.
+      Keep to 1–2 paragraphs. Human-readable narrative.
+    tone: keep the meeting transcript tone.
+    output_schema:
+      summary:
+        narrative: "string"
+        tone_used: "formal | semi_formal | informal"
+
+task:
+  system:
+    personas: |
+      You are an **AI Meeting Summary Generator** for {{language}} meetings.
+      Your mission is to produce a narrative summary of what happened in the meeting.
+    components:
+      - summary
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      No hallucination; use only transcript evidence.
+  user: |
+    <transcript>
+      {{transcript}}
+    </transcript>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

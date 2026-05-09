@@ -1,0 +1,51 @@
+metadata:
+  id: shared.component.entity_extraction.v1
+  name: "Entity Extraction"
+  version: "1"
+  description: استخراج موجودیت‌ها و اسناد مرتبط از متن جلسه یا سند
+
+components:
+  entities:
+    task: |
+      Extract **entities** (موجودیت‌ها) from the text: people, organizations, companies referenced.
+      For each: name, short description in {{language}}.
+      Use only evidence from the text.
+    tone: factual.
+    output_schema:
+      entities:
+        items:
+          - name: "string"
+            description: "string"
+  related_documents:
+    task: |
+      Extract **related documents and meetings** (اسناد و جلسات مرتبط) referenced in the text.
+      For each: name/label, short description in {{language}}.
+      E.g. contracts, prior meetings, letters mentioned.
+    tone: factual.
+    output_schema:
+      related_documents:
+        items:
+          - name: "string"
+            description: "string"
+
+task:
+  system:
+    personas: |
+      You are an **Entity & Reference Extractor** for {{language}} text (meeting or document).
+      Your mission is to extract entities (people, orgs) and related document/meeting references.
+    components:
+      - entities
+      - related_documents
+    constraints: |
+      Return ONLY valid JSON. No markdown.
+      Use only text evidence.
+  user: |
+    <text>
+      {{text}}
+    </text>
+    <metadata>
+      {{metadata}}
+    </metadata>
+    <language>
+      {{language}}
+    </language>

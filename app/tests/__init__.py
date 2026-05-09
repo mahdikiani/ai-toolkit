@@ -1,1 +1,1 @@
-"""Initialize package."""
+"""Test suite package."""

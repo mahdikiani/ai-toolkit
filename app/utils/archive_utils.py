@@ -43,8 +43,8 @@ def _extract_zip(file_content: BytesIO, temp_dir: Path) -> list[Path]:
 
 
 def _extract_tar(file_content: BytesIO, temp_dir: Path) -> list[Path]:
-    extracted_paths = []
     """Extract TAR file to temp directory."""
+    extracted_paths = []
     with tarfile.open(fileobj=file_content, mode="r") as tar_file:
         for member in tar_file.getmembers():
             if member.isfile():
@@ -59,8 +59,8 @@ def _extract_tar(file_content: BytesIO, temp_dir: Path) -> list[Path]:
 def _extract_single_file(
     file_content: BytesIO, temp_dir: Path, decompress_func: Callable[[bytes], bytes]
 ) -> list[Path]:
-    extracted_paths = []
     """Extract single compressed file to temp directory."""
+    extracted_paths = []
     decompressed = decompress_func(file_content.read())
     extracted_path = temp_dir / "extracted_file"
     extracted_path.parent.mkdir(parents=True, exist_ok=True)
@@ -120,9 +120,14 @@ async def run_directory_files(
     file_processor: Callable[[Path], object | Awaitable[object] | None],
 ) -> list[Path]:
     """
-    Process all files in input_dir using file_processor.
+    Process all files in a directory using the provided processor.
 
-    Return results as list of results.
+    Args:
+        input_dir: Directory containing files to process.
+        file_processor: Callable that processes each file path.
+
+    Returns:
+        List of results from processing each file.
     """
     file_paths = [
         file_path
@@ -149,9 +154,15 @@ async def process_directory_files(
     file_processor: Callable[[Path], str | Awaitable[str] | None],
 ) -> list[Path]:
     """
-    Process all files in input_dir using file_processor.
+    Process all files in a directory and write results as .txt files.
 
-    Write results as .txt files in output_dir.
+    Args:
+        input_dir: Directory containing files to process.
+        output_dir: Directory where result files will be written.
+        file_processor: Callable that processes each file and returns text.
+
+    Returns:
+        List of paths to the written output files.
     """
 
     file_paths = [

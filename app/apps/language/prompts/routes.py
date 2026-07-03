@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from server.config import Settings
 
+from .parser import parse_prompt_file
 from .schemas import PromptListResponse, PromptSchemaResponse
 
 router = APIRouter(prefix="/prompts", tags=["Prompts"])
@@ -45,12 +46,19 @@ async def get_prompt_schema(request: Request, prompt_name: str) -> PromptSchemaR
             detail=f"Prompt '{prompt_name}' not found",
         )
 
-    # TODO: Parse the YAML file and extract input fields and output schema
-    # For now, return basic info
-    return PromptSchemaResponse(
-        name=prompt_name,
-        description=f"Prompt template: {prompt_name}",
-        tags=[],
-        input_fields=[],
-        output_schema=None,
-    )
+    try:
+        prompt_data = parse_prompt_file(prompt_path)
+        return PromptSchemaResponse(
+            name=prompt_data["name"],
+            description=prompt_data["description"],
+            tags=prompt_data["tags"],
+            model=prompt_data["model"],
+            config=prompt_data["config"],
+            input_fields=prompt_data["input_fields"],
+            output_schema=prompt_data["output_schema"],
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to parse prompt '{prompt_name}': {str(e)}",
+        )

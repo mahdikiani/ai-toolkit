@@ -7,6 +7,7 @@ Validates: Requirements 4.1, 4.6, 9.2, 9.4
 """
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 from apps.executions.engine.engine import PromptEngine, _yaml_schema_to_json_schema
@@ -44,25 +45,27 @@ class TestPromptEngineRenderingDeterminism:
         )
     )
     @settings(max_examples=50)
-    def test_rendering_is_deterministic(self, input_data: dict, tmp_path: Path) -> None:
+    def test_rendering_is_deterministic(self, input_data: dict) -> None:
         """
         Property 2: Prompt engine rendering determinism.
 
         Rendering the same template with the same data should always produce
         identical output.
         """
-        prompt_file = tmp_path / "test_prompt.yaml"
-        prompt_file.write_text(
-            "task:\n"
-            "  system:\n"
-            "    persona: You are a helpful assistant\n"
-            "  user: 'Process the input'\n"
-        )
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            prompt_file = tmp_path / "test_prompt.yaml"
+            prompt_file.write_text(
+                "task:\n"
+                "  system:\n"
+                "    persona: You are a helpful assistant\n"
+                "  user: 'Process the input'\n"
+            )
 
-        engine = PromptEngine(base_dir=tmp_path)
+            engine = PromptEngine(base_dir=tmp_path)
 
-        system1, user1, format1 = engine.generate(prompt_file, input_data)
-        system2, user2, format2 = engine.generate(prompt_file, input_data)
+            system1, user1, format1 = engine.generate(prompt_file, input_data)
+            system2, user2, format2 = engine.generate(prompt_file, input_data)
 
         assert system1 == system2, (
             f"System prompt is not deterministic for input {input_data!r}"
@@ -77,18 +80,20 @@ class TestPromptEngineRenderingDeterminism:
     @given(st.text(max_size=100))
     @settings(max_examples=50)
     def test_text_variable_rendering_is_deterministic(
-        self, text_value: str, tmp_path: Path
+        self, text_value: str
     ) -> None:
         """Rendering with text variables should be deterministic."""
-        prompt_file = tmp_path / "test_prompt.yaml"
-        prompt_file.write_text(
-            "task:\n  system:\n    persona: You are helpful\n  user: '{{ text }}'\n"
-        )
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            prompt_file = tmp_path / "test_prompt.yaml"
+            prompt_file.write_text(
+                "task:\n  system:\n    persona: You are helpful\n  user: '{{ text }}'\n"
+            )
 
-        engine = PromptEngine(base_dir=tmp_path)
+            engine = PromptEngine(base_dir=tmp_path)
 
-        _, user1, _ = engine.generate(prompt_file, {"text": text_value})
-        _, user2, _ = engine.generate(prompt_file, {"text": text_value})
+            _, user1, _ = engine.generate(prompt_file, {"text": text_value})
+            _, user2, _ = engine.generate(prompt_file, {"text": text_value})
 
         assert user1 == user2
 

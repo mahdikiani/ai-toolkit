@@ -1,76 +1,52 @@
-"""Tests for execution task schemas."""
+"""Tests for promptic schemas."""
 
 import pytest
-from apps.executions.schemas import ExecutionTaskCreate, ExecutionTaskSchema
 from fastapi_mongo_base.tasks import TaskStatusEnum
 from pydantic import ValidationError
 
+from apps.language.promptic.schemas import PrompticCreate, PrompticSchema
 
-class TestExecutionTaskCreate:
-    """Test ExecutionTaskCreate schema."""
+
+class TestPrompticCreate:
+    """Test PrompticCreate schema."""
 
     def test_minimal_valid_creation(self) -> None:
         """Test creating task with minimal required fields."""
-        task = ExecutionTaskCreate(
-            template_name="test_template",
+        task = PrompticCreate(
             input_variables={"key": "value"},
         )
-        assert task.template_name == "test_template"
         assert task.input_variables == {"key": "value"}
-        assert task.user_id is None
         assert task.webhook_url is None
         assert task.idempotency_key is None
         assert task.meta_data == {}
-        assert task.blocking_mode is True
-        assert task.force_refresh is False
 
     def test_full_creation(self) -> None:
         """Test creating task with all fields."""
-        task = ExecutionTaskCreate(
-            template_name="test_template",
+        task = PrompticCreate(
             input_variables={"key": "value"},
-            user_id="user_123",
             webhook_url="https://example.com/webhook",
             idempotency_key="custom_key",
             meta_data={"chat_id": 456},
-            blocking_mode=False,
-            force_refresh=True,
         )
-        assert task.template_name == "test_template"
         assert task.input_variables == {"key": "value"}
-        assert task.user_id == "user_123"
         assert task.webhook_url == "https://example.com/webhook"
         assert task.idempotency_key == "custom_key"
         assert task.meta_data == {"chat_id": 456}
-        assert task.blocking_mode is False
-        assert task.force_refresh is True
-
-    def test_missing_template_name(self) -> None:
-        """Test that template_name is required."""
-        with pytest.raises(ValidationError) as exc_info:
-            ExecutionTaskCreate(input_variables={"key": "value"})
-
-        errors = exc_info.value.errors()
-        assert any(e["loc"] == ("template_name",) for e in errors)
 
     def test_default_values(self) -> None:
         """Test default values are applied correctly."""
-        task = ExecutionTaskCreate(
-            template_name="test",
-        )
+        task = PrompticCreate()
         assert task.input_variables == {}
         assert task.meta_data == {}
-        assert task.blocking_mode is True
-        assert task.force_refresh is False
 
 
-class TestExecutionTaskSchema:
-    """Test ExecutionTaskSchema."""
+class TestPrompticSchema:
+    """Test PrompticSchema."""
 
     def test_schema_inheritance(self) -> None:
         """Test that ExecutionTaskSchema inherits all fields."""
         task_data = {
-            "template_name": "test_template",
+            "prompt_name": "test_prompt",
             "input_variables": {"key": "value"},
             "idempotency_key": "generated_key_123",
             "user_id": "user_123",
@@ -78,9 +54,9 @@ class TestExecutionTaskSchema:
             "task_status": TaskStatusEnum.init,
         }
 
-        task = ExecutionTaskSchema(**task_data)
+        task = PrompticSchema(**task_data)
 
-        assert task.template_name == "test_template"
+        assert task.prompt_name == "test_prompt"
         assert task.input_variables == {"key": "value"}
         assert task.idempotency_key == "generated_key_123"
         assert task.user_id == "user_123"
@@ -92,8 +68,8 @@ class TestExecutionTaskSchema:
     def test_idempotency_key_required_in_schema(self) -> None:
         """Test that idempotency_key is required in ExecutionTaskSchema."""
         with pytest.raises(ValidationError) as exc_info:
-            ExecutionTaskSchema(
-                template_name="test",
+            PrompticSchema(
+                prompt_name="test",
                 user_id="user_123",
                 uid="550e8400-e29b-41d4-a716-446655440000",
                 task_status=TaskStatusEnum.init,
@@ -104,8 +80,8 @@ class TestExecutionTaskSchema:
 
     def test_result_and_error_fields(self) -> None:
         """Test result and error fields."""
-        task = ExecutionTaskSchema(
-            template_name="test",
+        task = PrompticSchema(
+            prompt_name="test",
             idempotency_key="key_123",
             user_id="user_123",
             uid="550e8400-e29b-41d4-a716-446655440000",
@@ -119,8 +95,8 @@ class TestExecutionTaskSchema:
 
     def test_webhook_failed_default(self) -> None:
         """Test webhook_failed defaults to False."""
-        task = ExecutionTaskSchema(
-            template_name="test",
+        task = PrompticSchema(
+            prompt_name="test",
             idempotency_key="key_123",
             user_id="user_123",
             uid="550e8400-e29b-41d4-a716-446655440000",

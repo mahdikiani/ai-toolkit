@@ -2,7 +2,9 @@
 
 import logging
 import os
+import sys
 from collections.abc import AsyncGenerator, Generator
+from importlib import import_module
 
 import httpx
 import pytest
@@ -12,7 +14,35 @@ from fastapi_mongo_base import models as base_mongo_models
 from fastapi_mongo_base.utils.basic import get_all_subclasses
 
 from server.config import Settings
-from server.server import app as fastapi_app
+
+
+def _install_legacy_test_aliases() -> None:
+    """Map old test imports to canonical app modules during test collection."""
+    aliases = {
+        "apps.chat": "apps.language.chat",
+        "apps.chat.models": "apps.language.chat.models",
+        "apps.chat.schemas": "apps.language.chat.schemas",
+        "apps.chat.services": "apps.language.chat.services",
+        "apps.translate": "apps.language.translate",
+        "apps.translate.models": "apps.language.translate.models",
+        "apps.translate.schemas": "apps.language.translate.schemas",
+        "apps.translate.services": "apps.language.translate.services",
+        "apps.executions": "apps.language.promptic",
+        "apps.executions.models": "apps.language.promptic.models",
+        "apps.executions.schemas": "apps.language.promptic.schemas",
+        "apps.executions.services": "apps.language.promptic.services",
+        "apps.executions.engine": "apps.language.promptic.engine",
+        "apps.executions.engine.engine": "apps.language.promptic.engine.engine",
+    }
+    for old_name, new_name in aliases.items():
+        sys.modules.setdefault(old_name, import_module(new_name))
+
+
+_install_legacy_test_aliases()
+
+from server.server import app as fastapi_app  # noqa: E402
+
+pytest_plugins = ["tests.fixtures.file_fixtures"]
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -1,4 +1,4 @@
-"""Schemas for execution task management."""
+"""Schemas for promptic task management."""
 
 from datetime import datetime
 
@@ -7,8 +7,8 @@ from fastapi_mongo_base.tasks import TaskMixin
 from pydantic import BaseModel, Field
 
 
-class ExecutionTaskCreate(BaseModel):
-    """Schema for creating an execution task."""
+class PrompticCreate(BaseModel):
+    """Schema for creating a promptic run."""
 
     input_variables: dict[str, object] = Field(
         default_factory=dict,
@@ -28,13 +28,13 @@ class ExecutionTaskCreate(BaseModel):
     )
 
 
-class ExecutionTaskSchema(UserOwnedEntitySchema, TaskMixin, ExecutionTaskCreate):
+class PrompticSchema(UserOwnedEntitySchema, TaskMixin, PrompticCreate):
     """
-    Complete execution task schema with lifecycle tracking.
+    Complete promptic schema with lifecycle tracking.
 
     Inherits from UserOwnedEntitySchema for user ownership and permissions.
     Inherits from TaskMixin for task lifecycle management and webhooks.
-    Inherits from ExecutionTaskCreate for core execution fields.
+    Inherits from PrompticCreate for core promptic fields.
     """
 
     prompt_name: str = Field(..., description="Name of the prompt template")
@@ -50,6 +50,18 @@ class ExecutionTaskSchema(UserOwnedEntitySchema, TaskMixin, ExecutionTaskCreate)
         default=None,
         description="LLM response text",
     )
+    provider_meta: dict[str, object] | None = Field(
+        default=None,
+        description="Raw provider/model usage metadata for later pay-as-you-go billing",
+    )
+    usage_amount: float | None = Field(
+        default=None,
+        description="Metered usage amount charged through finance",
+    )
+    usage_id: str | None = Field(
+        default=None,
+        description="Finance usage record uid",
+    )
     error: str | None = Field(
         default=None,
         description="Error message if execution failed",
@@ -62,3 +74,7 @@ class ExecutionTaskSchema(UserOwnedEntitySchema, TaskMixin, ExecutionTaskCreate)
         default=False,
         description="True if webhook delivery failed after all retries",
     )
+
+
+ExecutionTaskCreate = PrompticCreate
+ExecutionTaskSchema = PrompticSchema

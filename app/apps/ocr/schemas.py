@@ -18,6 +18,7 @@ class OcrEngineType(StrEnum):
 
     llm = "llm"
     paddle = "paddle"
+    paddleocr_vl_1_5 = "paddleocr_vl_1_5"
 
 
 class OcrTaskSchemaCreate(BaseModel):
@@ -125,9 +126,9 @@ class OcrTaskSchema(UserOwnedEntitySchema, TaskMixin, OcrTaskSchemaCreate):  # t
     result: str | None = None
     usage_amount: float | None = None
     usage_id: str | None = None
+    provider_meta: dict | None = None
 
     @property
     def webhook_exclude_fields(self) -> set[str]:
         """Return fields to exclude from webhook payload."""
-        return {}
         return {"result"}

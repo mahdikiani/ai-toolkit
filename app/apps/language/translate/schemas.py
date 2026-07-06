@@ -20,5 +20,6 @@ class TranslateSchema(UserOwnedEntitySchema, TaskMixin, TranslateSchemaCreate): 
     """Complete translation task schema including result and usage fields."""
 
     result: str | None = None
+    provider_meta: dict | None = None
     usage_amount: float | None = None
     usage_id: str | None = None

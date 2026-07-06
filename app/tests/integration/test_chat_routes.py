@@ -93,9 +93,9 @@ class TestOpenAICompatibleEndpoint:
     async def test_openai_endpoint_without_auth(
         self, client: httpx.AsyncClient
     ) -> None:
-        """POST /chat/openai/v1/chat/completions without auth should return 401."""
+        """POST /completion/v1/chat/completions without auth should return 401."""
         response = await client.post(
-            "/chat/openai/v1/chat/completions",
+            "/completion/v1/chat/completions",
             json={
                 "model": "openai/gpt-4o-mini",
                 "messages": [{"role": "user", "content": "Hello"}],
@@ -106,9 +106,9 @@ class TestOpenAICompatibleEndpoint:
     async def test_openai_endpoint_invalid_json(
         self, client: httpx.AsyncClient
     ) -> None:
-        """POST /chat/openai/v1/chat/completions with invalid JSON should return 400 or 401."""
+        """POST /completion/v1/chat/completions with invalid JSON should return 400 or 401."""
         response = await client.post(
-            "/chat/openai/v1/chat/completions",
+            "/completion/v1/chat/completions",
             content=b"not valid json",
             headers={"Content-Type": "application/json"},
         )

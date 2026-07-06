@@ -5,11 +5,68 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
+from apps.transcribe.schemas import ChunkMetadata, TranscribeTaskSchema
 from apps.transcribe.services import (
     _combine_chunk_texts,
     save_error,
     save_result,
 )
+
+
+@pytest.mark.unit
+class TestTranscribeAudioDuration:
+    """Tests for TranscribeTaskSchema audio_duration property."""
+
+    def test_uses_explicit_audio_duration_seconds(self) -> None:
+        """audio_duration should prefer explicit client-provided seconds."""
+        task = TranscribeTaskSchema(
+            uid="task_123",
+            user_id="user_123",
+            file_url="https://example.com/audio.mp3",
+            audio_duration_seconds=12.5,
+        )
+
+        assert task.audio_duration == 12.5
+
+    def test_uses_provider_meta_duration(self) -> None:
+        """audio_duration should use persisted provider usage metadata."""
+        task = TranscribeTaskSchema(
+            uid="task_123",
+            user_id="user_123",
+            file_url="https://example.com/audio.mp3",
+            provider_meta={"usage": {"audio_duration_seconds": 30}},
+        )
+
+        assert task.audio_duration == 30
+
+    def test_uses_chunk_end_time(self) -> None:
+        """audio_duration should derive seconds from chunk metadata."""
+        task = TranscribeTaskSchema(
+            uid="task_123",
+            user_id="user_123",
+            file_url="https://example.com/audio.mp3",
+            chunks=[
+                ChunkMetadata(chunk_id=0, start_ms=0, end_ms=1000, file_path="a.wav"),
+                ChunkMetadata(
+                    chunk_id=1,
+                    start_ms=1000,
+                    end_ms=2500,
+                    file_path="b.wav",
+                ),
+            ],
+        )
+
+        assert task.audio_duration == 2.5
+
+    def test_unknown_duration_is_zero(self) -> None:
+        """audio_duration should not guess when no metadata is available."""
+        task = TranscribeTaskSchema(
+            uid="task_123",
+            user_id="user_123",
+            file_url="https://example.com/audio.mp3",
+        )
+
+        assert task.audio_duration == 0.0
 
 
 @pytest.mark.unit
@@ -295,7 +352,9 @@ class TestTranscriptionQuotaAndMetering:
             await process_transcribe(task)
 
         mock_check_quota.assert_called_once_with(
-            task.user_id, task.audio_duration, raise_exception=False
+            task.user_id,
+            task.audio_duration / 60,
+            raise_exception=False,
         )
 
     async def test_meters_usage_after_chunked_transcription(self) -> None:
@@ -426,7 +485,7 @@ class TestTranscriptionQuotaAndMetering:
         # Verify metering was called
         mock_meter.assert_called_once()
         # Cost should be ceil((60000 / 60 / 1000) * 10) = 10
-        assert mock_meter.call_args[0][1] == 10
+        assert mock_meter.call_args[0][1] == 1.0
 
 
 @pytest.mark.unit

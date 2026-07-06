@@ -64,13 +64,22 @@ async def process_ocr(task: OcrTask) -> OcrTask:
 
         # Process pages with OCR
         engine = _resolve_ocr_engine(task)
-        if engine == "paddleocr_vl_1_5":
+        if engine in (OcrEngineType.paddle, OcrEngineType.paddleocr_vl_1_5):
             text_pages = await process_pages_with_paddle(pages)
         else:
             text_pages = await process_pages_batch(pages, max_concurrent=10)
 
         # Meter usage
-        usage = await finance.meter_cost(task.user_id, len(pages))
+        amount = finance.estimate_ocr_cost(pages=len(pages), engine=engine.value)
+        usage = await finance.meter_cost(
+            task.user_id,
+            amount,
+            meta_data={
+                "service": "ocr",
+                "engine": engine.value,
+                "pages": len(pages),
+            },
+        )
 
         # Save result
         result = "\n\n".join([t for t in text_pages if t])
@@ -79,6 +88,11 @@ async def process_ocr(task: OcrTask) -> OcrTask:
             result,
             usage_amount=float(usage.amount) if usage else None,
             usage_id=usage.uid if usage else None,
+            provider_meta={
+                "provider": "ocr",
+                "engine": engine.value,
+                "usage": {"pages": len(pages)},
+            },
         )
 
     except Exception:
@@ -98,11 +112,13 @@ async def save_result(
     result: str,
     usage_amount: float | None = None,
     usage_id: str | None = None,
+    provider_meta: dict | None = None,
 ) -> OcrTask:
     """Save successful result for a task."""
     task.result = texttools.normalize_text(result)
     task.task_status = TaskStatusEnum.completed
     task.usage_amount = usage_amount
     task.usage_id = usage_id
+    task.provider_meta = provider_meta
     await task.save_report("Task processed successfully")
     return task

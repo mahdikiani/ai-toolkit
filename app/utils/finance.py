@@ -1,8 +1,9 @@
-"""Financial utilities for quota management and usage metering via uFaaS."""
+"""Financial utilities for quota management and configurable usage metering."""
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from decimal import Decimal
+from typing import Any
 
 import httpx
 from ufaas import exceptions
@@ -12,6 +13,83 @@ from server.config import Settings
 from .saas import QuotaSchema, UsageCreateSchema, UsageSchema
 
 resource_variant = getattr(Settings, "UFAAS_RESOURCE_VARIANT", "")
+
+
+DEFAULT_PRICING: dict[str, Any] = {
+    "text": {
+        "markup": 1.0,
+        "default_per_1k_tokens": 1.0,
+        "models": {},
+    },
+    "ocr": {
+        "default_per_page": 1.0,
+        "engines": {},
+    },
+    "transcribe": {
+        "providers": {
+            "soniox": {"per_minute": 1.0},
+        },
+    },
+    "youtube": {
+        "per_request": 1.0,
+    },
+}
+
+
+def pricing_config() -> dict[str, Any]:
+    """Return configured pricing rules with safe defaults."""
+    configured = getattr(Settings, "pricing", None)
+    if isinstance(configured, dict):
+        return {**DEFAULT_PRICING, **configured}
+    return DEFAULT_PRICING
+
+
+def estimate_text_cost(
+    *,
+    model: str | None = None,
+    usage: dict | None = None,
+    raw_cost: float | int | str | None = None,
+) -> float:
+    """Estimate text model cost from provider usage metadata."""
+    pricing = pricing_config()["text"]
+    markup = float(pricing.get("markup", 1.0))
+    if raw_cost is not None:
+        return float(raw_cost) * markup
+
+    total_tokens = 0
+    if usage:
+        total_tokens = int(usage.get("total_tokens") or 0)
+        if not total_tokens:
+            total_tokens = int(usage.get("prompt_tokens") or 0) + int(
+                usage.get("completion_tokens") or 0
+            )
+    model_pricing = pricing.get("models", {}).get(model or "", {})
+    per_1k = float(
+        model_pricing.get("per_1k_tokens")
+        or pricing.get("default_per_1k_tokens", 1.0)
+    )
+    return (total_tokens / 1000) * per_1k * markup
+
+
+def estimate_ocr_cost(*, pages: int, engine: str | None = None) -> float:
+    """Estimate OCR cost by page count and engine."""
+    pricing = pricing_config()["ocr"]
+    engine_pricing = pricing.get("engines", {}).get(engine or "", {})
+    per_page = float(engine_pricing.get("per_page") or pricing["default_per_page"])
+    return max(0, pages) * per_page
+
+
+def estimate_transcribe_cost(*, minutes: float, provider: str = "soniox") -> float:
+    """Estimate transcription cost by duration and provider."""
+    pricing = pricing_config()["transcribe"]
+    provider_pricing = pricing.get("providers", {}).get(provider, {})
+    per_minute = float(provider_pricing.get("per_minute", 1.0))
+    return max(0.0, minutes) * per_minute
+
+
+def estimate_youtube_cost() -> float:
+    """Estimate one YouTube transcript API request cost."""
+    return float(pricing_config()["youtube"].get("per_request", 1.0))
 
 
 @asynccontextmanager

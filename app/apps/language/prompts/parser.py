@@ -9,7 +9,8 @@ from jinja2 import Environment, meta
 
 
 def extract_jinja2_variables(template_str: str) -> set[str]:
-    """Extract all Jinja2 variables from a template string.
+    """
+    Extract all Jinja2 variables from a template string.
 
     Args:
         template_str: The template string to parse
@@ -27,7 +28,8 @@ def extract_jinja2_variables(template_str: str) -> set[str]:
 
 
 def infer_field_type(variable_name: str, context: dict[str, Any]) -> str:
-    """Infer the type of a field based on its name and context.
+    """
+    Infer the type of a field based on its name and context.
 
     Args:
         variable_name: The name of the variable
@@ -64,7 +66,8 @@ def infer_field_type(variable_name: str, context: dict[str, Any]) -> str:
 
 
 def parse_prompt_file(prompt_path: Path) -> dict[str, Any]:
-    """Parse a YAML prompt file and extract schema information.
+    """
+    Parse a YAML prompt file and extract schema information.
 
     Args:
         prompt_path: Path to the YAML prompt file
@@ -79,7 +82,7 @@ def parse_prompt_file(prompt_path: Path) -> dict[str, Any]:
     if not prompt_path.exists():
         raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
 
-    with open(prompt_path, "r", encoding="utf-8") as f:
+    with open(prompt_path, encoding="utf-8") as f:
         content = yaml.safe_load(f)
 
     if not isinstance(content, dict):
@@ -116,7 +119,8 @@ def parse_prompt_file(prompt_path: Path) -> dict[str, Any]:
 def _extract_input_fields(
     messages: list[dict[str, Any]], examples: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """Extract input fields from message templates.
+    """
+    Extract input fields from message templates.
 
     Args:
         messages: List of message blocks
@@ -162,7 +166,8 @@ def _extract_input_fields(
 
 
 def render_prompt(prompt_path: Path, context: dict[str, Any]) -> dict[str, Any]:
-    """Render a prompt template with the given context.
+    """
+    Render a prompt template with the given context.
 
     Args:
         prompt_path: Path to the YAML prompt file

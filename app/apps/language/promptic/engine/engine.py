@@ -1,10 +1,9 @@
 """Prompt Engine."""
 
 import json
+import tomllib
 from pathlib import Path
 
-import toml
-import xmltodict
 import yaml
 from jinja2 import Template
 
@@ -72,9 +71,7 @@ def load_data(path: Path | str) -> dict | str:
     if path.suffix.lower() in (".yaml", ".yml"):
         return yaml.safe_load(raw) or {}
     if path.suffix.lower() in (".toml",):
-        return toml.load(raw)
-    if path.suffix.lower() in (".xml",):
-        return xmltodict.parse(raw)
+        return tomllib.loads(raw)
     if path.suffix.lower() in (".txt",):
         return raw.strip()
     if path.suffix.lower() in (".md",):
@@ -221,27 +218,35 @@ class PromptEngine:
         self._prompt_dir = prompt_path.resolve().parent
 
         main_config = load_data(prompt_path)
-        if not isinstance(main_config, dict):
-            raise TypeError("Prompt file must yield a dict")
-
         render_ctx = self._prepare_render_context(input_data)
-        system_cfg = main_config.get("task", {}).get("system", {})
+        if isinstance(main_config, str):
+            return "", Template(main_config).render(**render_ctx), None
+        if not isinstance(main_config, dict):
+            raise TypeError("Prompt file must yield a dict or string")
+
+        task_cfg = main_config.get("task", {})
+        system_cfg = task_cfg.get("system") or main_config.get("system", {})
         components_cfg = main_config.get("components", {})
         system_parts: list[str] = []
         component_key_parts: dict[str, list[str]] = {}
         merged_output_schema: dict = {}
 
-        for key, value in system_cfg.items():
-            if key == "components":
-                (
-                    comp_xml_parts,
-                    component_key_parts,
-                    component_schemas,
-                ) = self._process_components(value, components_cfg, render_ctx)
-                system_parts.extend(comp_xml_parts)
-                if component_schemas:
-                    merged_output_schema.update(component_schemas)
-            else:
+        if isinstance(system_cfg, str):
+            part = self._render_system_key("system", system_cfg, render_ctx)
+            if part:
+                system_parts.append(part)
+        else:
+            for key, value in system_cfg.items():
+                if key == "components":
+                    (
+                        comp_xml_parts,
+                        component_key_parts,
+                        component_schemas,
+                    ) = self._process_components(value, components_cfg, render_ctx)
+                    system_parts.extend(comp_xml_parts)
+                    if component_schemas:
+                        merged_output_schema.update(component_schemas)
+                    continue
                 part = self._render_system_key(key, value, render_ctx)
                 if part:
                     system_parts.append(part)
@@ -253,7 +258,12 @@ class PromptEngine:
                 )
 
         system_xml = "\n\n".join(system_parts)
-        user_template = main_config.get("task", {}).get("user", "")
+        user_template = (
+            task_cfg.get("user")
+            or main_config.get("user")
+            or main_config.get("prompt")
+            or ""
+        )
         user_xml = Template(user_template).render(**render_ctx)
 
         response_format: dict | None = None

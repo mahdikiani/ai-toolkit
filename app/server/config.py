@@ -1,6 +1,7 @@
 """FastAPI server configuration."""
 
 import dataclasses
+import json
 import os
 from pathlib import Path
 from typing import ClassVar
@@ -18,7 +19,11 @@ class Settings(config.Settings):
     project_name: str = os.getenv("PROJECT_NAME", "pishrun ai")
     base_dir: Path = Path(__file__).resolve().parent.parent
     prompts_dir: ClassVar[Path] = (
-        Path(__file__).resolve().parent.parent / "apps" / "executions" / "prompts"
+        Path(__file__).resolve().parent.parent
+        / "apps"
+        / "language"
+        / "promptic"
+        / "prompts"
     )
     base_path: str = "/api/ai/v1"
     storage_path: str = os.getenv("STORAGE_PATH", str(base_dir / "storage"))
@@ -46,6 +51,7 @@ class Settings(config.Settings):
     paddle_device: str = os.getenv("PADDLE_DEVICE", "cpu")
 
     minutes_price: float = float(os.getenv("MINUTES_PRICE", 1))
+    pricing: ClassVar[dict] = json.loads(os.getenv("AI_TOOLKIT_PRICING", "{}"))
 
     transcribe_enable_chunking: bool = (
         os.getenv("TRANSCRIBE_ENABLE_CHUNKING", "1") == "1"

@@ -22,8 +22,58 @@ from utils import conditions, finance, texttools
 from . import chunker_ffmpeg as chunker
 from .models import TranscribeTask
 
-soniox = SonioxClient(Settings.soniox_api_key)
 CHUNK_STORAGE_ROOT = Path(Settings.storage_path) / "transcribe-chunks"
+_soniox_client: SonioxClient | None = None
+
+
+class LazySonioxClient:
+    """Patchable lazy proxy for Soniox API methods."""
+
+    def _client(self) -> SonioxClient:
+        global _soniox_client
+        if _soniox_client is None:
+            if not Settings.soniox_api_key:
+                raise RuntimeError("SONIOX_API_KEY is not configured")
+            _soniox_client = SonioxClient(Settings.soniox_api_key)
+        return _soniox_client
+
+    async def transcribe_url_async(self, *args: object, **kwargs: object) -> object:
+        """Proxy transcribe URL calls to a lazily-created client."""
+        return await self._client().transcribe_url_async(*args, **kwargs)
+
+    async def transcribe_file_async(self, *args: object, **kwargs: object) -> object:
+        """Proxy transcribe file calls to a lazily-created client."""
+        return await self._client().transcribe_file_async(*args, **kwargs)
+
+    async def get_transcription_job_async(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        """Proxy job lookup calls to a lazily-created client."""
+        return await self._client().get_transcription_job_async(*args, **kwargs)
+
+    async def get_transcription_result_async(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        """Proxy result lookup calls to a lazily-created client."""
+        return await self._client().get_transcription_result_async(*args, **kwargs)
+
+
+soniox = LazySonioxClient()
+
+
+def get_soniox_client() -> SonioxClient:
+    """Create a Soniox client only when transcription processing is requested."""
+    return soniox  # type: ignore[return-value]
+
+
+def _task_provider(task: TranscribeTask) -> str:
+    """Return a valid provider value from persisted tasks or loose test doubles."""
+    provider = getattr(task, "provider", "soniox")
+    return provider if isinstance(provider, str) else "soniox"
 
 
 async def process_transcribe(
@@ -39,11 +89,23 @@ async def process_transcribe(
     Chunk audio and submit to transcription service.
     """
     logging.info("Starting processing for task %s", task.uid)
+    provider = _task_provider(task)
+    if provider != "soniox":
+        return await save_error(
+            task,
+            f"Unsupported transcribe provider: {provider}",
+        )
 
-    quota = await finance.check_quota(
-        task.user_id, task.audio_duration, raise_exception=False
+    estimated_cost = finance.estimate_transcribe_cost(
+        minutes=task.audio_duration / 60,
+        provider=provider,
     )
-    if quota < 1:
+    quota = await finance.check_quota(
+        task.user_id,
+        estimated_cost,
+        raise_exception=False,
+    )
+    if quota < estimated_cost:
         return await save_error(task, "insufficient_quota")
 
     if Settings.transcribe_enable_chunking:
@@ -60,6 +122,7 @@ async def process_transcribe(
 
 
 async def _process_single_job(task: TranscribeTask, *, sync: bool) -> TranscribeTask:
+    soniox = get_soniox_client()
     job = await soniox.transcribe_url_async(
         task.file_url,
         _build_transcription_config(task, chunk_id=None, use_webhook=True),
@@ -185,6 +248,7 @@ async def _transcribe_chunks(
         audio_chunk: chunker.AudioChunk,
     ) -> chunker.ChunkTranscriptionResult:
         async with semaphore:
+            soniox = get_soniox_client()
             job = await soniox.transcribe_file_async(
                 str(audio_chunk.file_path),
                 _build_transcription_config(task, chunk_id=audio_chunk.chunk_id),
@@ -226,6 +290,7 @@ async def _transcribe_chunks(
 
 
 async def _wait_for_job_completion(job_id: str) -> TranscriptionJob:
+    soniox = get_soniox_client()
     while True:
         job = await soniox.get_transcription_job_async(job_id)
         if job.status == TranscriptionJobStatus.COMPLETED:
@@ -288,6 +353,11 @@ async def save_result(
     task.task_status = TaskStatusEnum.completed
     task.usage_amount = usage_amount
     task.usage_id = usage_id
+    task.provider_meta = {
+        "provider": task.provider,
+        "model": task.model,
+        "usage": {"audio_duration_seconds": task.audio_duration},
+    }
     return await task.save()
 
 
@@ -308,13 +378,25 @@ async def process_transcription_webhook(
     if data.status == TranscriptionJobStatus.ERROR:
         return await process_error_webhook(task, "Transcription job status is error")
 
+    soniox = get_soniox_client()
     job_result = await soniox.get_transcription_job_async(task.transcription_job_id)
 
-    transcription_cost = math.ceil(
-        ((job_result.audio_duration_ms or 0) / 60 / 1000) * Settings.minutes_price
+    transcription_cost = finance.estimate_transcribe_cost(
+        minutes=(job_result.audio_duration_ms or 0) / 60 / 1000,
+        provider=task.provider,
     )
     total_cost = transcription_cost + translation_cost
-    await finance.meter_cost(task.user_id, total_cost)
+    usage = await finance.meter_cost(
+        task.user_id,
+        total_cost,
+        meta_data={
+            "service": "transcribe",
+            "provider": task.provider,
+            "model": task.model,
+            "job_id": task.transcription_job_id,
+            "audio_duration_ms": job_result.audio_duration_ms,
+        },
+    )
     logging.info(
         "%s %s %s %s",
         task.uid,
@@ -328,7 +410,12 @@ async def process_transcription_webhook(
     result = await soniox.get_transcription_result_async(task.transcription_job_id)
 
     await conditions.Conditions().release_condition(task.uid)
-    return await save_result(task, result.text, transcription_cost)
+    return await save_result(
+        task,
+        result.text,
+        float(usage.amount) if usage else transcription_cost,
+        usage.uid if usage else None,
+    )
 
 
 async def process_error_webhook(
@@ -342,6 +429,7 @@ async def process_error_webhook(
     # )
     if not task.transcription_job_id:
         return await save_error(task, "Transcription job ID is required")
+    soniox = get_soniox_client()
     job = await soniox.get_transcription_job_async(task.transcription_job_id)
 
     return await save_error(task, message, error_message=job.error_message)

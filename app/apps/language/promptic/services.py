@@ -1,4 +1,4 @@
-"""Services for execution task management."""
+"""Services for promptic task management."""
 
 import json
 import logging
@@ -9,18 +9,19 @@ from fastapi import HTTPException
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
 from server.config import Settings
+from utils import finance
 from utils import openrouter as openrouter_client
 
 from .engine import PromptEngine
 
 if TYPE_CHECKING:
-    from .models import ExecutionTask
-    from .schemas import ExecutionTaskCreate
+    from .models import PrompticTask
+    from .schemas import PrompticCreate
 
 logger = logging.getLogger(__name__)
 
 
-def check_schemas(prompt_name: str, data: "ExecutionTaskCreate") -> None:
+def check_schemas(prompt_name: str, data: "PrompticCreate") -> None:
     """Validate that the prompt exists and input variables match schema."""
     prompts_dir = Settings.prompts_dir
     prompt_path = prompts_dir / f"{prompt_name}.yaml"
@@ -41,8 +42,9 @@ async def call_openrouter(
     max_tokens: int | None = None,
     temperature: float = 0.2,
     response_format: dict | None = None,
-) -> str:
-    """Call OpenRouter API."""
+    return_meta: bool = False,
+) -> str | tuple[str, dict[str, object]]:
+    """Call OpenRouter API and optionally return provider metadata."""
     model = model or Settings.default_model
     body: dict = {
         "model": model,
@@ -66,7 +68,10 @@ async def call_openrouter(
             + json.dumps(data, ensure_ascii=False)[:500]
         )
     content = choices[0].get("message", {}).get("content") or ""
-    return content.strip()
+    provider_meta = openrouter_client.extract_provider_meta(data, provider="openrouter")
+    if not return_meta:
+        return content.strip()
+    return content.strip(), provider_meta
 
 
 async def call_openrouter_stream(
@@ -95,7 +100,7 @@ async def call_openrouter_stream(
         yield delta
 
 
-async def invoke_stream(task: "ExecutionTask") -> AsyncIterator[str]:
+async def invoke_stream(task: "PrompticTask") -> AsyncIterator[str]:
     """Execute prompt and stream the response."""
     prompts_dir = Settings.prompts_dir
     prompt_path = prompts_dir / f"{task.prompt_name}.yaml"
@@ -134,14 +139,14 @@ async def invoke_stream(task: "ExecutionTask") -> AsyncIterator[str]:
         raise
 
 
-async def process_execution_task(
-    task: "ExecutionTask",
+async def process_promptic(
+    task: "PrompticTask",
     *,
     force_restart: bool = False,
     sync: bool = False,
     **kwargs: object,
-) -> "ExecutionTask":
-    """Process an execution task by invoking the prompt template."""
+) -> "PrompticTask":
+    """Process a promptic run by invoking the prompt template."""
     prompts_dir = Settings.prompts_dir
     prompt_path = prompts_dir / f"{task.prompt_name}.yaml"
 
@@ -157,14 +162,39 @@ async def process_execution_task(
             prompt_path, task.input_variables
         )
 
-        result = await call_openrouter(
+        openrouter_result = await call_openrouter(
             system_prompt,
             user_prompt,
             response_format=response_format,
             temperature=0.2,
+            return_meta=True,
+        )
+        if isinstance(openrouter_result, tuple):
+            result, provider_meta = openrouter_result
+        else:
+            result = openrouter_result
+            provider_meta = {}
+
+        usage = (provider_meta.get("usage") if provider_meta else None) or {}
+        amount = finance.estimate_text_cost(
+            model=str(provider_meta.get("model") or ""),
+            usage=usage if isinstance(usage, dict) else None,
+            raw_cost=provider_meta.get("raw_cost"),
+        )
+        metered = await finance.meter_cost(
+            task.user_id,
+            amount,
+            meta_data={
+                "service": "promptic",
+                "prompt": task.prompt_name,
+                "provider_meta": provider_meta,
+            },
         )
 
         task.result = result
+        task.provider_meta = provider_meta
+        task.usage_amount = float(metered.amount) if metered else amount
+        task.usage_id = metered.uid if metered else None
         task.task_status = TaskStatusEnum.completed
         await task.save()
 
@@ -175,3 +205,6 @@ async def process_execution_task(
         await task.save()
 
     return task
+
+
+process_execution_task = process_promptic

@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from fastapi import HTTPException
 
 from server.config import Settings
+from utils import finance
 from utils import openrouter as openrouter_client
 
 from .models import ChatMessage, ChatThread
@@ -115,6 +116,25 @@ async def complete_assistant_message(
     content = ""
     if choices:
         content = (choices[0].get("message") or {}).get("content") or ""
+    provider_meta = openrouter_client.extract_provider_meta(
+        raw_json,
+        provider="openrouter",
+    )
+    provider_usage = provider_meta.get("usage")
+    amount = finance.estimate_text_cost(
+        model=str(provider_meta.get("model") or payload["model"]),
+        usage=provider_usage if isinstance(provider_usage, dict) else None,
+        raw_cost=provider_meta.get("raw_cost"),
+    )
+    usage = await finance.meter_cost(
+        user_id,
+        amount,
+        meta_data={
+            "service": "chat",
+            "thread_uid": thread.uid,
+            "provider_meta": provider_meta,
+        },
+    )
 
     return await ChatMessage.create_item({
         "thread_uid": thread.uid,
@@ -123,7 +143,8 @@ async def complete_assistant_message(
         "role": "assistant",
         "content": content.strip(),
         "completion_extra": {
-            "model": raw_json.get("model"),
-            "usage": raw_json.get("usage"),
+            "provider_meta": provider_meta,
+            "usage_amount": float(usage.amount) if usage else amount,
+            "usage_id": usage.uid if usage else None,
         },
     })

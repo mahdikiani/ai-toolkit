@@ -1,10 +1,10 @@
-"""Chat sessions (threads/messages) and OpenAI-compatible OpenRouter proxy."""
+"""Chat sessions, threads, messages, and persisted assistant replies."""
 
 import json
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 from fastapi_mongo_base.schemas import PaginatedResponse
 from fastapi_mongo_base.utils import usso_routes
 from usso.integrations.fastapi import USSOAuthentication
@@ -26,9 +26,6 @@ from .services import (
     complete_assistant_message,
     iter_openrouter_sse_deltas,
     messages_as_openrouter,
-    openrouter_headers,
-    proxy_chat_completions,
-    proxy_chat_completions_raw_stream,
     thread_model,
 )
 
@@ -311,39 +308,5 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
         )
 
 
-chat_router = APIRouter(prefix="/chat", tags=["Chat"])
-chat_router.include_router(ChatSessionRouter().router)
-
-
-@chat_router.post("/v1/chat/completions")
-async def openai_compatible_chat_completions(  # noqa: ANN201
-    request: Request,
-):  # -> Response | StreamingResponse:
-    """Pass-through OpenRouter proxy (same schema as OpenAI chat completions)."""
-    sess_router = ChatSessionRouter()
-    await sess_router.get_user(request)
-    try:
-        body = await request.json()
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail="Invalid JSON body") from e
-
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="Body must be a JSON object")
-
-    stream_requested = body.get("stream") is True
-
-    if stream_requested:
-        openrouter_headers()
-
-        async def passthrough() -> AsyncIterator[bytes]:
-            async for chunk in proxy_chat_completions_raw_stream(body):
-                yield chunk
-
-        return StreamingResponse(passthrough(), media_type="text/event-stream")
-
-    raw, ctype, status = await proxy_chat_completions(body)
-    return Response(
-        content=raw,
-        status_code=status,
-        media_type=ctype or "application/json",
-    )
+router = APIRouter(prefix="/chat", tags=["Chat"])
+router.include_router(ChatSessionRouter().router)

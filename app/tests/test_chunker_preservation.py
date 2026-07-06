@@ -49,6 +49,7 @@ class TestAudioDurationPreservation:
                 subprocess.run(
                     [
                         "ffmpeg",
+                        "-y",
                         "-f",
                         "lavfi",
                         "-i",
@@ -97,6 +98,7 @@ class TestAudioDurationPreservation:
                     subprocess.run(
                         [
                             "ffmpeg",
+                            "-y",
                             "-f",
                             "lavfi",
                             "-i",
@@ -146,6 +148,7 @@ class TestSilenceDetectionPreservation:
                 subprocess.run(
                     [
                         "ffmpeg",
+                        "-y",
                         "-f",
                         "lavfi",
                         "-i",
@@ -210,6 +213,7 @@ class TestSilenceDetectionPreservation:
                 subprocess.run(
                     [
                         "ffmpeg",
+                        "-y",
                         "-f",
                         "lavfi",
                         "-i",
@@ -359,6 +363,7 @@ class TestAudioExportPreservation:
                 subprocess.run(
                     [
                         "ffmpeg",
+                        "-y",
                         "-f",
                         "lavfi",
                         "-i",
@@ -431,6 +436,7 @@ class TestAudioExportPreservation:
                 subprocess.run(
                     [
                         "ffmpeg",
+                        "-y",
                         "-f",
                         "lavfi",
                         "-i",
@@ -613,6 +619,7 @@ class TestChunkPlanIntegrationPreservation:
             subprocess.run(
                 [
                     "ffmpeg",
+                    "-y",
                     "-f",
                     "lavfi",
                     "-i",
@@ -681,6 +688,7 @@ class TestChunkPlanIntegrationPreservation:
             subprocess.run(
                 [
                     "ffmpeg",
+                    "-y",
                     "-f",
                     "lavfi",
                     "-i",

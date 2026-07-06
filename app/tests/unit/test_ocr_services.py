@@ -388,7 +388,11 @@ class TestOcrQuotaAndErrorHandling:
             result = await process_ocr(task)
 
         # Verify metering was called with correct parameters
-        mock_meter_cost.assert_called_once_with("user_123", 3)
+        mock_meter_cost.assert_called_once_with(
+            "user_123",
+            3.0,
+            meta_data={"service": "ocr", "engine": "llm", "pages": 3},
+        )
 
         # Verify usage info was saved to task
         assert result.usage_amount == 3.0

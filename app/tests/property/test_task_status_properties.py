@@ -12,9 +12,13 @@ from hypothesis import strategies as st
 
 # Valid state machine transitions
 VALID_TRANSITIONS: dict[TaskStatusEnum, set[TaskStatusEnum]] = {
+    TaskStatusEnum.none: {TaskStatusEnum.init, TaskStatusEnum.processing},
+    TaskStatusEnum.draft: {TaskStatusEnum.init, TaskStatusEnum.processing},
     TaskStatusEnum.init: {TaskStatusEnum.processing, TaskStatusEnum.error},
     TaskStatusEnum.processing: {TaskStatusEnum.completed, TaskStatusEnum.error},
+    TaskStatusEnum.paused: {TaskStatusEnum.processing, TaskStatusEnum.error},
     TaskStatusEnum.completed: {TaskStatusEnum.error},  # Can fail after completion
+    TaskStatusEnum.done: {TaskStatusEnum.error},
     TaskStatusEnum.error: set(),  # Terminal state
 }
 

@@ -60,5 +60,5 @@ async def get_prompt_schema(request: Request, prompt_name: str) -> PromptSchemaR
     except Exception as e:
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to parse prompt '{prompt_name}': {str(e)}",
-        )
+            detail=f"Failed to parse prompt '{prompt_name}': {e!s}",
+        ) from e

@@ -1,4 +1,4 @@
-"""Models for execution task management."""
+"""Models for promptic task management."""
 
 from typing import ClassVar, Self
 
@@ -6,21 +6,21 @@ from fastapi_mongo_base.models import UserOwnedEntity
 from fastapi_mongo_base.tasks import TaskStatusEnum
 from pymongo import ASCENDING, IndexModel
 
-from .schemas import ExecutionTaskSchema
+from .schemas import PrompticSchema
 
 
-class ExecutionTask(UserOwnedEntity, ExecutionTaskSchema):  # type: ignore[misc]
+class PrompticTask(UserOwnedEntity, PrompticSchema):  # type: ignore[misc]
     """
-    Execution task for prompt template invocations.
+    Promptic task for prompt template invocations.
 
     Inherits from UserOwnedEntity for user ownership and permissions.
     Inherits from ExecutionTaskSchema for task lifecycle management and webhooks.
     """
 
     class Settings(UserOwnedEntity.Settings):
-        """Beanie document settings with execution task indexes."""
+        """Beanie document settings with promptic indexes."""
 
-        name = "execution_tasks"
+        name = "promptic"
         indexes: ClassVar[list[IndexModel]] = [
             *UserOwnedEntity.Settings.indexes,
             IndexModel([("idempotency_key", ASCENDING)]),
@@ -35,10 +35,13 @@ class ExecutionTask(UserOwnedEntity, ExecutionTaskSchema):  # type: ignore[misc]
     async def start_processing(
         self, *, force_restart: bool = False, sync: bool = False, **kwargs: object
     ) -> Self:
-        """Start background execution of the prompt template."""
+        """Start background processing of the prompt template."""
         from . import services
 
         self.task_status = TaskStatusEnum.processing
-        return await services.process_execution_task(  # type: ignore[return-value]
+        return await services.process_promptic(  # type: ignore[return-value]
             self, force_restart=force_restart, sync=sync, **kwargs
         )
+
+
+ExecutionTask = PrompticTask

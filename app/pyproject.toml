@@ -80,8 +80,10 @@ select = [
 ignore = ["TRY003", "COM812", "B008", "D202", "D203", "D209", "D212", "D413"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["G004", "S101", "S105", "S106", "S108", "S404", "S603", "S607", "B017", "ASYNC221", "D401", "RUF069", "ANN", "RUF029", "T201", "E501"]
+"tests/**" = ["G004", "S101", "S105", "S106", "S108", "S404", "S603", "S607", "B017", "ASYNC221", "D401", "ANN", "RUF029", "T201", "E501"]
 "apps/language/translate/services.py" = ["TRY301"]
+"apps/language/promptic/engine/engine.py" = ["C901", "S701"]
+"apps/language/prompts/parser.py" = ["C901", "S701", "TRY004"]
 
 [tool.ruff.format]
 quote-style = "double"

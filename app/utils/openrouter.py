@@ -41,6 +41,17 @@ def build_headers(*, api_key: str | None = None) -> dict[str, str]:
     }
 
 
+def extract_provider_meta(data: dict, *, provider: str) -> dict[str, object]:
+    """Return normalized provider usage metadata from a completion response."""
+    return {
+        "provider": provider,
+        "id": data.get("id"),
+        "model": data.get("model"),
+        "usage": data.get("usage"),
+        "raw_cost": data.get("cost") or data.get("total_cost"),
+    }
+
+
 def parse_sse_delta_line(line: str) -> str | None:
     """Extract a text delta from one SSE line, or a stream sentinel."""
     if not line or line.startswith(":"):

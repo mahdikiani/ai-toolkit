@@ -297,7 +297,8 @@ def _find_silence_between(
             continue
         if start > window_end:
             break
-        return math.floor((start + end) / 2)
+        midpoint = math.floor((start + end) / 2)
+        return min(max(midpoint, window_start), window_end)
     return None
 
 

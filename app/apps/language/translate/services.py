@@ -2,8 +2,8 @@
 
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
-from apps.executions.engine import PromptEngine, load_data
-from apps.executions.services import call_openrouter
+from apps.language.promptic.engine import PromptEngine, load_data
+from apps.language.promptic.services import call_openrouter
 from server.config import Settings
 from utils import finance, texttools
 
@@ -44,23 +44,40 @@ async def process_translate(task: TranslateTask) -> TranslateTask:
         if max_tokens is not None:
             max_tokens = int(max_tokens)
 
-        result = await call_openrouter(
+        openrouter_result = await call_openrouter(
             system_prompt,
             user_prompt,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             response_format=response_format,
+            return_meta=True,
         )
+        if isinstance(openrouter_result, tuple):
+            result, provider_meta = openrouter_result
+        else:
+            result = openrouter_result
+            provider_meta = {}
 
+        provider_usage = provider_meta.get("usage") if provider_meta else None
+        amount = finance.estimate_text_cost(
+            model=str(provider_meta.get("model") or model or ""),
+            usage=provider_usage if isinstance(provider_usage, dict) else None,
+            raw_cost=provider_meta.get("raw_cost"),
+        )
         usage = await finance.meter_cost(
             task.user_id,
-            1.0,
-            meta_data={"service": "translate", "prompt": "translate"},
+            amount,
+            meta_data={
+                "service": "translate",
+                "prompt": "translate",
+                "provider_meta": provider_meta,
+            },
         )
         await save_result(
             task,
             result,
+            provider_meta=provider_meta,
             usage_amount=float(usage.amount) if usage else None,
             usage_id=usage.uid if usage else None,
         )
@@ -76,11 +93,13 @@ async def process_translate(task: TranslateTask) -> TranslateTask:
 async def save_result(
     task: TranslateTask,
     result: str,
+    provider_meta: dict | None = None,
     usage_amount: float | None = None,
     usage_id: str | None = None,
 ) -> TranslateTask:
     """Save successful result for a translation task."""
     task.result = texttools.normalize_text(result)
+    task.provider_meta = provider_meta
     task.task_status = TaskStatusEnum.completed
     task.usage_amount = usage_amount
     task.usage_id = usage_id

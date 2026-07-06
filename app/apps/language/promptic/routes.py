@@ -1,4 +1,4 @@
-"""Invocation API routes."""
+"""Promptic API routes."""
 
 from collections.abc import AsyncIterator
 
@@ -12,28 +12,28 @@ from usso.integrations.fastapi import USSOAuthentication
 from server.config import Settings
 
 from . import services
-from .models import ExecutionTask
-from .schemas import ExecutionTaskCreate, ExecutionTaskSchema
+from .models import PrompticTask
+from .schemas import PrompticCreate, PrompticSchema
 
 
-class ExecutionRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
-    """Router for invocation API endpoints."""
+class PrompticRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
+    """Router for promptic API endpoints."""
 
-    model = ExecutionTask
-    schema = ExecutionTaskSchema
+    model = PrompticTask
+    schema = PrompticSchema
 
     def __init__(self) -> None:
         """Initialize the router."""
         super().__init__(
             user_dependency=USSOAuthentication(),
             draftable=False,
+            prefix="/promptic",
+            tags=["Promptic"],
         )
 
     def config_routes(self, **kwargs: object) -> None:
         """Configure routes for the router."""
-        super().config_routes(
-            prefix="executions", update_route=False, webhook_route=False, **kwargs
-        )
+        super().config_routes(update_route=False, webhook_route=False, **kwargs)
 
     async def list_items(
         self,
@@ -42,8 +42,8 @@ class ExecutionRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         offset: int = Query(0, ge=0),
         limit: int = Query(10, ge=1, le=Settings.page_max_limit),
         user_id: str | None = None,
-    ) -> PaginatedResponse[ExecutionTask]:
-        """List invocations for a prompt."""
+    ) -> PaginatedResponse[PrompticTask]:
+        """List promptic runs for a prompt."""
         return await self._list_items(
             request, offset, limit, prompt_name=prompt_name, user_id=user_id
         )
@@ -52,19 +52,19 @@ class ExecutionRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         self,
         request: Request,
         prompt_name: str,
-        data: ExecutionTaskCreate,
+        data: PrompticCreate,
         background_tasks: BackgroundTasks,
         blocking: bool = False,
         stream: bool = False,
-    ) -> ExecutionTask | StreamingResponse:
-        """Create a new invocation for a prompt."""
+    ) -> PrompticTask | StreamingResponse:
+        """Create a new promptic run for a prompt."""
         user = await self.get_user(request)
 
         services.check_schemas(prompt_name, data)
 
         data.input_variables.setdefault("language", "Persian")
 
-        item: ExecutionTask = await self.model.create_item({
+        item: PrompticTask = await self.model.create_item({
             **data.model_dump(exclude_none=True),
             "prompt_name": prompt_name,
             "user_id": user.uid,
@@ -94,4 +94,6 @@ class ExecutionRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         return await item.start_processing()
 
 
-router = ExecutionRouter().router
+router = PrompticRouter().router
+
+ExecutionRouter = PrompticRouter

@@ -4,14 +4,15 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from apps.executions.services import (
+from fastapi import HTTPException
+from fastapi_mongo_base.tasks import TaskStatusEnum
+
+from apps.language.promptic.services import (
     call_openrouter,
     call_openrouter_stream,
     check_schemas,
     process_execution_task,
 )
-from fastapi import HTTPException
-from fastapi_mongo_base.tasks import TaskStatusEnum
 
 
 @pytest.mark.unit
@@ -23,14 +24,14 @@ class TestCheckSchemas:
         prompt_file = tmp_path / "my_prompt.yaml"
         prompt_file.write_text("task:\n  system: {}\n  user: hello\n")
 
-        with patch("apps.executions.services.Settings") as mock_settings:
+        with patch("apps.language.promptic.services.Settings") as mock_settings:
             mock_settings.prompts_dir = tmp_path
             data = MagicMock()
             check_schemas("my_prompt", data)  # Should not raise
 
     def test_missing_prompt_raises_404(self, tmp_path: Path) -> None:
         """check_schemas should raise HTTPException 404 for missing prompts."""
-        with patch("apps.executions.services.Settings") as mock_settings:
+        with patch("apps.language.promptic.services.Settings") as mock_settings:
             mock_settings.prompts_dir = tmp_path
             data = MagicMock()
 
@@ -49,7 +50,7 @@ class TestCallOpenrouter:
         """call_openrouter should return content from API response."""
         mock_response = {"choices": [{"message": {"content": "Hello from AI"}}]}
         with patch(
-            "apps.executions.services.openrouter_client.complete_chat_json",
+            "apps.language.promptic.services.openrouter_client.complete_chat_json",
             new_callable=AsyncMock,
             return_value=mock_response,
         ):
@@ -61,7 +62,7 @@ class TestCallOpenrouter:
         """call_openrouter should strip leading/trailing whitespace."""
         mock_response = {"choices": [{"message": {"content": "  Trimmed response  "}}]}
         with patch(
-            "apps.executions.services.openrouter_client.complete_chat_json",
+            "apps.language.promptic.services.openrouter_client.complete_chat_json",
             new_callable=AsyncMock,
             return_value=mock_response,
         ):
@@ -73,7 +74,7 @@ class TestCallOpenrouter:
         """call_openrouter should raise RuntimeError when choices is empty."""
         mock_response = {"choices": []}
         with patch(
-            "apps.executions.services.openrouter_client.complete_chat_json",
+            "apps.language.promptic.services.openrouter_client.complete_chat_json",
             new_callable=AsyncMock,
             return_value=mock_response,
         ), pytest.raises(RuntimeError, match="No response from model"):
@@ -83,7 +84,7 @@ class TestCallOpenrouter:
         """call_openrouter should raise RuntimeError when choices key is missing."""
         mock_response = {}
         with patch(
-            "apps.executions.services.openrouter_client.complete_chat_json",
+            "apps.language.promptic.services.openrouter_client.complete_chat_json",
             new_callable=AsyncMock,
             return_value=mock_response,
         ), pytest.raises(RuntimeError, match="No response from model"):
@@ -94,11 +95,11 @@ class TestCallOpenrouter:
         mock_response = {"choices": [{"message": {"content": "ok"}}]}
         with (
             patch(
-                "apps.executions.services.openrouter_client.complete_chat_json",
+                "apps.language.promptic.services.openrouter_client.complete_chat_json",
                 new_callable=AsyncMock,
                 return_value=mock_response,
             ) as mock_complete,
-            patch("apps.executions.services.Settings") as mock_settings,
+            patch("apps.language.promptic.services.Settings") as mock_settings,
         ):
             mock_settings.default_model = "openai/gpt-4o-mini"
             await call_openrouter(system="sys", user="usr")
@@ -110,7 +111,7 @@ class TestCallOpenrouter:
         """call_openrouter should use provided model when specified."""
         mock_response = {"choices": [{"message": {"content": "ok"}}]}
         with patch(
-            "apps.executions.services.openrouter_client.complete_chat_json",
+            "apps.language.promptic.services.openrouter_client.complete_chat_json",
             new_callable=AsyncMock,
             return_value=mock_response,
         ) as mock_complete:
@@ -124,7 +125,7 @@ class TestCallOpenrouter:
         mock_response = {"choices": [{"message": {"content": "{}"}}]}
         response_format = {"type": "json_schema", "json_schema": {"name": "resp"}}
         with patch(
-            "apps.executions.services.openrouter_client.complete_chat_json",
+            "apps.language.promptic.services.openrouter_client.complete_chat_json",
             new_callable=AsyncMock,
             return_value=mock_response,
         ) as mock_complete:
@@ -148,7 +149,7 @@ class TestCallOpenrouterStream:
                 yield chunk
 
         with patch(
-            "apps.executions.services.openrouter_client.stream_chat_deltas",
+            "apps.language.promptic.services.openrouter_client.stream_chat_deltas",
             side_effect=mock_stream,
         ):
             chunks = [chunk async for chunk in call_openrouter_stream(system="sys", user="usr")]
@@ -163,7 +164,7 @@ class TestCallOpenrouterStream:
             yield  # make it a generator
 
         with patch(
-            "apps.executions.services.openrouter_client.stream_chat_deltas",
+            "apps.language.promptic.services.openrouter_client.stream_chat_deltas",
             side_effect=mock_empty_stream,
         ):
             chunks = [chunk async for chunk in call_openrouter_stream(system="sys", user="usr")]
@@ -188,9 +189,9 @@ class TestProcessExecutionTask:
         task.save = AsyncMock()
 
         with (
-            patch("apps.executions.services.Settings") as mock_settings,
+            patch("apps.language.promptic.services.Settings") as mock_settings,
             patch(
-                "apps.executions.services.call_openrouter",
+                "apps.language.promptic.services.call_openrouter",
                 new_callable=AsyncMock,
                 return_value="AI result",
             ),
@@ -209,7 +210,7 @@ class TestProcessExecutionTask:
         task.input_variables = {}
         task.save = AsyncMock()
 
-        with patch("apps.executions.services.Settings") as mock_settings:
+        with patch("apps.language.promptic.services.Settings") as mock_settings:
             mock_settings.prompts_dir = tmp_path
             result = await process_execution_task(task)
 
@@ -229,9 +230,9 @@ class TestProcessExecutionTask:
         task.save = AsyncMock()
 
         with (
-            patch("apps.executions.services.Settings") as mock_settings,
+            patch("apps.language.promptic.services.Settings") as mock_settings,
             patch(
-                "apps.executions.services.call_openrouter",
+                "apps.language.promptic.services.call_openrouter",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("API error"),
             ),
@@ -254,7 +255,7 @@ class TestExecutionErrorHandling:
 
         **Validates: Requirements 12.1, 12.6**
         """
-        with patch("apps.executions.services.Settings") as mock_settings:
+        with patch("apps.language.promptic.services.Settings") as mock_settings:
             mock_settings.prompts_dir = tmp_path
             data = MagicMock()
 
@@ -280,7 +281,7 @@ class TestExecutionErrorHandling:
             "task:\n  system:\n    persona: You are helpful\n  user: '{{ text }}'\n"
         )
 
-        with patch("apps.executions.services.Settings") as mock_settings:
+        with patch("apps.language.promptic.services.Settings") as mock_settings:
             mock_settings.prompts_dir = tmp_path
             data = MagicMock()
 
@@ -307,9 +308,9 @@ class TestExecutionErrorHandling:
 
         # Test with RuntimeError (API error)
         with (
-            patch("apps.executions.services.Settings") as mock_settings,
+            patch("apps.language.promptic.services.Settings") as mock_settings,
             patch(
-                "apps.executions.services.call_openrouter",
+                "apps.language.promptic.services.call_openrouter",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError(
                     "OpenRouter API error: 500 Internal Server Error"
@@ -344,9 +345,9 @@ class TestExecutionErrorHandling:
 
         # Test with generic Exception (network error)
         with (
-            patch("apps.executions.services.Settings") as mock_settings,
+            patch("apps.language.promptic.services.Settings") as mock_settings,
             patch(
-                "apps.executions.services.call_openrouter",
+                "apps.language.promptic.services.call_openrouter",
                 new_callable=AsyncMock,
                 side_effect=Exception("Connection timeout"),
             ),
@@ -372,7 +373,7 @@ class TestExecutionErrorHandling:
         task.input_variables = {"text": "hello"}
         task.save = AsyncMock()
 
-        with patch("apps.executions.services.Settings") as mock_settings:
+        with patch("apps.language.promptic.services.Settings") as mock_settings:
             mock_settings.prompts_dir = tmp_path
             result = await process_execution_task(task)
 

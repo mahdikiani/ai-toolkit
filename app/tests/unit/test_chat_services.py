@@ -3,14 +3,15 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from apps.chat.services import (
+from fastapi import HTTPException
+
+from apps.language.chat.services import (
     complete_assistant_message,
     messages_as_openrouter,
     openrouter_headers,
     proxy_chat_completions,
     thread_model,
 )
-from fastapi import HTTPException
 
 
 @pytest.mark.unit
@@ -31,7 +32,7 @@ class TestThreadModel:
         thread = MagicMock()
         thread.chat_model = None
 
-        with patch("apps.chat.services.Settings") as mock_settings:
+        with patch("apps.language.chat.services.Settings") as mock_settings:
             mock_settings.default_model = "openai/gpt-4o-mini"
             result = thread_model(thread)
 
@@ -45,7 +46,7 @@ class TestOpenrouterHeaders:
     def test_returns_headers_when_key_configured(self) -> None:
         """openrouter_headers should return headers when API key is set."""
         with patch(
-            "apps.chat.services.openrouter_client.build_headers",
+            "apps.language.chat.services.openrouter_client.build_headers",
             return_value={"Authorization": "Bearer test_key"},
         ):
             headers = openrouter_headers()
@@ -56,7 +57,7 @@ class TestOpenrouterHeaders:
         """openrouter_headers should raise 503 when API key is not configured."""
         with (
             patch(
-                "apps.chat.services.openrouter_client.build_headers",
+                "apps.language.chat.services.openrouter_client.build_headers",
                 side_effect=ValueError("No API key"),
             ),
             pytest.raises(HTTPException) as exc_info,
@@ -86,7 +87,7 @@ class TestMessagesAsOpenrouter:
         mock_msg2.content = "Hi there!"
 
         with patch(
-            "apps.chat.services.ChatMessage.list_items",
+            "apps.language.chat.services.ChatMessage.list_items",
             new_callable=AsyncMock,
             return_value=[mock_msg1, mock_msg2],
         ):
@@ -105,7 +106,7 @@ class TestMessagesAsOpenrouter:
         thread.uid = "thread_uid_123"
 
         with patch(
-            "apps.chat.services.ChatMessage.list_items",
+            "apps.language.chat.services.ChatMessage.list_items",
             new_callable=AsyncMock,
             return_value=[],
         ):
@@ -137,17 +138,17 @@ class TestCompleteAssistantMessage:
 
         with (
             patch(
-                "apps.chat.services.messages_as_openrouter",
+                "apps.language.chat.services.messages_as_openrouter",
                 new_callable=AsyncMock,
                 return_value=mock_messages,
             ),
             patch(
-                "apps.chat.services.openrouter_client.complete_chat_json",
+                "apps.language.chat.services.openrouter_client.complete_chat_json",
                 new_callable=AsyncMock,
                 return_value=mock_openrouter_response,
             ),
             patch(
-                "apps.chat.services.ChatMessage.create_item",
+                "apps.language.chat.services.ChatMessage.create_item",
                 new_callable=AsyncMock,
                 return_value=mock_created_msg,
             ),
@@ -168,7 +169,7 @@ class TestCompleteAssistantMessage:
 
         with (
             patch(
-                "apps.chat.services.messages_as_openrouter",
+                "apps.language.chat.services.messages_as_openrouter",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
@@ -190,12 +191,12 @@ class TestCompleteAssistantMessage:
 
         with (
             patch(
-                "apps.chat.services.messages_as_openrouter",
+                "apps.language.chat.services.messages_as_openrouter",
                 new_callable=AsyncMock,
                 return_value=[{"role": "user", "content": "Hello"}],
             ),
             patch(
-                "apps.chat.services.openrouter_client.complete_chat_json",
+                "apps.language.chat.services.openrouter_client.complete_chat_json",
                 new_callable=AsyncMock,
                 side_effect=ValueError("No API key"),
             ),
@@ -217,12 +218,12 @@ class TestCompleteAssistantMessage:
 
         with (
             patch(
-                "apps.chat.services.messages_as_openrouter",
+                "apps.language.chat.services.messages_as_openrouter",
                 new_callable=AsyncMock,
                 return_value=[{"role": "user", "content": "Hello"}],
             ),
             patch(
-                "apps.chat.services.openrouter_client.complete_chat_json",
+                "apps.language.chat.services.openrouter_client.complete_chat_json",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("API error"),
             ),
@@ -249,7 +250,7 @@ class TestProxyChatCompletions:
         mock_response.status_code = 200
 
         with patch(
-            "apps.chat.services.openrouter_client.post_chat_completion_unchecked",
+            "apps.language.chat.services.openrouter_client.post_chat_completion_unchecked",
             new_callable=AsyncMock,
             return_value=mock_response,
         ):
@@ -263,7 +264,7 @@ class TestProxyChatCompletions:
         """proxy_chat_completions should raise 503 when API key is not configured."""
         with (
             patch(
-                "apps.chat.services.openrouter_client.post_chat_completion_unchecked",
+                "apps.language.chat.services.openrouter_client.post_chat_completion_unchecked",
                 new_callable=AsyncMock,
                 side_effect=ValueError("No API key"),
             ),
@@ -290,10 +291,10 @@ class TestProxyChatCompletionsRawStream:
                 yield chunk
 
         with patch(
-            "apps.chat.services.openrouter_client.stream_chat_completion_bytes",
+            "apps.language.chat.services.openrouter_client.stream_chat_completion_bytes",
             return_value=mock_stream(),
         ):
-            from apps.chat.services import proxy_chat_completions_raw_stream
+            from apps.language.chat.services import proxy_chat_completions_raw_stream
 
             chunks = [chunk async for chunk in proxy_chat_completions_raw_stream({"model": "gpt-4"})]
 
@@ -310,10 +311,10 @@ class TestProxyChatCompletionsRawStream:
             yield  # pragma: no cover
 
         with patch(
-            "apps.chat.services.openrouter_client.stream_chat_completion_bytes",
+            "apps.language.chat.services.openrouter_client.stream_chat_completion_bytes",
             return_value=failing_stream(),
         ):
-            from apps.chat.services import proxy_chat_completions_raw_stream
+            from apps.language.chat.services import proxy_chat_completions_raw_stream
 
             with pytest.raises(HTTPException) as exc_info:
                 async for _ in proxy_chat_completions_raw_stream({"model": "gpt-4"}):
@@ -332,10 +333,10 @@ class TestProxyChatCompletionsRawStream:
             yield  # pragma: no cover
 
         with patch(
-            "apps.chat.services.openrouter_client.stream_chat_completion_bytes",
+            "apps.language.chat.services.openrouter_client.stream_chat_completion_bytes",
             return_value=failing_stream(),
         ):
-            from apps.chat.services import proxy_chat_completions_raw_stream
+            from apps.language.chat.services import proxy_chat_completions_raw_stream
 
             with pytest.raises(HTTPException) as exc_info:
                 async for _ in proxy_chat_completions_raw_stream({"model": "gpt-4"}):
@@ -357,10 +358,10 @@ class TestIterOpenrouterSseDeltas:
                 yield delta
 
         with patch(
-            "apps.chat.services.openrouter_client.stream_chat_deltas",
+            "apps.language.chat.services.openrouter_client.stream_chat_deltas",
             return_value=mock_stream(),
         ):
-            from apps.chat.services import iter_openrouter_sse_deltas
+            from apps.language.chat.services import iter_openrouter_sse_deltas
 
             deltas = [delta async for delta in iter_openrouter_sse_deltas({"model": "gpt-4"})]
 
@@ -374,10 +375,10 @@ class TestIterOpenrouterSseDeltas:
             yield  # pragma: no cover
 
         with patch(
-            "apps.chat.services.openrouter_client.stream_chat_deltas",
+            "apps.language.chat.services.openrouter_client.stream_chat_deltas",
             return_value=failing_stream(),
         ):
-            from apps.chat.services import iter_openrouter_sse_deltas
+            from apps.language.chat.services import iter_openrouter_sse_deltas
 
             with pytest.raises(HTTPException) as exc_info:
                 async for _ in iter_openrouter_sse_deltas({"model": "gpt-4"}):
@@ -394,10 +395,10 @@ class TestIterOpenrouterSseDeltas:
             yield  # pragma: no cover
 
         with patch(
-            "apps.chat.services.openrouter_client.stream_chat_deltas",
+            "apps.language.chat.services.openrouter_client.stream_chat_deltas",
             return_value=failing_stream(),
         ):
-            from apps.chat.services import iter_openrouter_sse_deltas
+            from apps.language.chat.services import iter_openrouter_sse_deltas
 
             with pytest.raises(HTTPException) as exc_info:
                 async for _ in iter_openrouter_sse_deltas({"model": "gpt-4"}):

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import math
@@ -88,6 +90,15 @@ async def create_chunk_plan(
 
 async def _download_audio(file_url: str, destination: Path) -> None:
     """Download audio file from URL."""
+    if file_url.startswith("data:"):
+        _, _, encoded_payload = file_url.partition(",")
+        try:
+            payload = base64.b64decode(encoded_payload)
+        except binascii.Error as exc:
+            raise ValueError("Invalid base64 audio payload") from exc
+        await asyncio.to_thread(destination.write_bytes, payload)
+        return
+
     async with (
         httpx.AsyncClient(follow_redirects=True) as client,
         client.stream("GET", file_url, timeout=None) as response,
@@ -304,6 +315,18 @@ def _find_silence_between(
 
 def _guess_extension(file_url: str) -> str:
     """Guess file extension from URL."""
+    if file_url.startswith("data:"):
+        mime_type = file_url[5:].split(";", 1)[0]
+        return {
+            "audio/mpeg": ".mp3",
+            "audio/mp3": ".mp3",
+            "audio/wav": ".wav",
+            "audio/x-wav": ".wav",
+            "audio/mp4": ".m4a",
+            "video/mp4": ".mp4",
+            "video/webm": ".webm",
+        }.get(mime_type, ".audio")
+
     parsed = urlparse(file_url)
     suffix = Path(parsed.path).suffix
     return suffix or ".audio"

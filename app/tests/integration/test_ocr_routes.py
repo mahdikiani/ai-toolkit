@@ -77,3 +77,13 @@ class TestOcrRoutes:
         """POST /ocrs/upload without file should return 422."""
         response = await client.post("/ocrs/upload")
         assert response.status_code in (401, 403, 422)
+
+    async def test_upload_base64_endpoint_without_auth(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        """POST /ocrs/upload/base64 without auth should return 401."""
+        response = await client.post(
+            "/ocrs/upload/base64",
+            json={"content_base64": "ZmFrZSBwZGY=", "mime_type": "application/pdf"},
+        )
+        assert response.status_code in (401, 403)

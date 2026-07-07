@@ -4,8 +4,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from apps.translate.services import save_result
 from fastapi_mongo_base.tasks import TaskStatusEnum
+
+from apps.language.translate.services import save_result
 
 
 @pytest.mark.unit
@@ -47,7 +48,7 @@ class TestProcessTranslate:
 
     async def test_sets_error_when_prompt_missing(self, tmp_path: Path) -> None:
         """process_translate should set error when translate.yaml is missing."""
-        from apps.translate.services import process_translate
+        from apps.language.translate.services import process_translate
 
         task = MagicMock()
         task.uid = "task_123"
@@ -56,7 +57,7 @@ class TestProcessTranslate:
         task.language = "Persian"
         task.save = AsyncMock(return_value=task)
 
-        with patch("apps.translate.services.Settings") as mock_settings:
+        with patch("apps.language.translate.services.Settings") as mock_settings:
             mock_settings.prompts_dir = tmp_path  # No translate.yaml here
 
             result = await process_translate(task)
@@ -66,7 +67,7 @@ class TestProcessTranslate:
 
     async def test_translates_text_successfully(self, tmp_path: Path) -> None:
         """process_translate should translate text and set completed status."""
-        from apps.translate.services import process_translate
+        from apps.language.translate.services import process_translate
 
         # Create a minimal translate.yaml
         translate_yaml = tmp_path / "translate.yaml"
@@ -89,14 +90,14 @@ class TestProcessTranslate:
         mock_usage.uid = "usage_123"
 
         with (
-            patch("apps.translate.services.Settings") as mock_settings,
+            patch("apps.language.translate.services.Settings") as mock_settings,
             patch(
-                "apps.translate.services.call_openrouter",
+                "apps.language.translate.services.call_openrouter",
                 new_callable=AsyncMock,
                 return_value="سلام دنیا",
             ),
             patch(
-                "apps.translate.services.finance.meter_cost",
+                "apps.language.translate.services.finance.meter_cost",
                 new_callable=AsyncMock,
                 return_value=mock_usage,
             ),
@@ -111,7 +112,7 @@ class TestProcessTranslate:
 
     async def test_sets_error_on_openrouter_exception(self, tmp_path: Path) -> None:
         """process_translate should set error status when OpenRouter raises."""
-        from apps.translate.services import process_translate
+        from apps.language.translate.services import process_translate
 
         translate_yaml = tmp_path / "translate.yaml"
         translate_yaml.write_text(
@@ -129,9 +130,9 @@ class TestProcessTranslate:
         task.save = AsyncMock(return_value=task)
 
         with (
-            patch("apps.translate.services.Settings") as mock_settings,
+            patch("apps.language.translate.services.Settings") as mock_settings,
             patch(
-                "apps.translate.services.call_openrouter",
+                "apps.language.translate.services.call_openrouter",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("API error"),
             ),
@@ -153,7 +154,7 @@ class TestTranslationErrorHandling:
         self, tmp_path: Path
     ) -> None:
         """process_translate should handle unsupported languages gracefully."""
-        from apps.translate.services import process_translate
+        from apps.language.translate.services import process_translate
 
         translate_yaml = tmp_path / "translate.yaml"
         translate_yaml.write_text(
@@ -175,14 +176,14 @@ class TestTranslationErrorHandling:
         mock_usage.uid = "usage_123"
 
         with (
-            patch("apps.translate.services.Settings") as mock_settings,
+            patch("apps.language.translate.services.Settings") as mock_settings,
             patch(
-                "apps.translate.services.call_openrouter",
+                "apps.language.translate.services.call_openrouter",
                 new_callable=AsyncMock,
                 return_value="Unable to translate to Klingon",
             ),
             patch(
-                "apps.translate.services.finance.meter_cost",
+                "apps.language.translate.services.finance.meter_cost",
                 new_callable=AsyncMock,
                 return_value=mock_usage,
             ),
@@ -198,7 +199,7 @@ class TestTranslationErrorHandling:
 
     async def test_handles_empty_language_with_default(self, tmp_path: Path) -> None:
         """process_translate should use default language when language is None."""
-        from apps.translate.services import process_translate
+        from apps.language.translate.services import process_translate
 
         translate_yaml = tmp_path / "translate.yaml"
         translate_yaml.write_text(
@@ -220,18 +221,18 @@ class TestTranslationErrorHandling:
         mock_usage.uid = "usage_123"
 
         with (
-            patch("apps.translate.services.Settings") as mock_settings,
+            patch("apps.language.translate.services.Settings") as mock_settings,
             patch(
-                "apps.translate.services.call_openrouter",
+                "apps.language.translate.services.call_openrouter",
                 new_callable=AsyncMock,
                 return_value="سلام دنیا",
             ),
             patch(
-                "apps.translate.services.finance.meter_cost",
+                "apps.language.translate.services.finance.meter_cost",
                 new_callable=AsyncMock,
                 return_value=mock_usage,
             ),
-            patch("apps.translate.services.PromptEngine") as mock_engine_class,
+            patch("apps.language.translate.services.PromptEngine") as mock_engine_class,
         ):
             mock_settings.prompts_dir = tmp_path
             mock_settings.default_model = "openai/gpt-4o-mini"
@@ -255,7 +256,7 @@ class TestTranslationErrorHandling:
 
     async def test_handles_api_timeout_error(self, tmp_path: Path) -> None:
         """process_translate should handle API timeout errors."""
-        from apps.translate.services import process_translate
+        from apps.language.translate.services import process_translate
 
         translate_yaml = tmp_path / "translate.yaml"
         translate_yaml.write_text(
@@ -273,9 +274,9 @@ class TestTranslationErrorHandling:
         task.save = AsyncMock(return_value=task)
 
         with (
-            patch("apps.translate.services.Settings") as mock_settings,
+            patch("apps.language.translate.services.Settings") as mock_settings,
             patch(
-                "apps.translate.services.call_openrouter",
+                "apps.language.translate.services.call_openrouter",
                 new_callable=AsyncMock,
                 side_effect=TimeoutError("Request timeout"),
             ),
@@ -290,7 +291,7 @@ class TestTranslationErrorHandling:
 
     async def test_handles_api_connection_error(self, tmp_path: Path) -> None:
         """process_translate should handle API connection errors."""
-        from apps.translate.services import process_translate
+        from apps.language.translate.services import process_translate
 
         translate_yaml = tmp_path / "translate.yaml"
         translate_yaml.write_text(
@@ -308,9 +309,9 @@ class TestTranslationErrorHandling:
         task.save = AsyncMock(return_value=task)
 
         with (
-            patch("apps.translate.services.Settings") as mock_settings,
+            patch("apps.language.translate.services.Settings") as mock_settings,
             patch(
-                "apps.translate.services.call_openrouter",
+                "apps.language.translate.services.call_openrouter",
                 new_callable=AsyncMock,
                 side_effect=ConnectionError("Failed to connect to API"),
             ),
@@ -325,7 +326,7 @@ class TestTranslationErrorHandling:
 
     async def test_handles_invalid_yaml_prompt(self, tmp_path: Path) -> None:
         """process_translate should handle invalid YAML prompt structure."""
-        from apps.translate.services import process_translate
+        from apps.language.translate.services import process_translate
 
         translate_yaml = tmp_path / "translate.yaml"
         # Write invalid YAML (not a mapping)
@@ -338,7 +339,7 @@ class TestTranslationErrorHandling:
         task.language = "German"
         task.save = AsyncMock(return_value=task)
 
-        with patch("apps.translate.services.Settings") as mock_settings:
+        with patch("apps.language.translate.services.Settings") as mock_settings:
             mock_settings.prompts_dir = tmp_path
             mock_settings.default_model = "openai/gpt-4o-mini"
 
@@ -349,7 +350,7 @@ class TestTranslationErrorHandling:
 
     async def test_handles_finance_metering_failure(self, tmp_path: Path) -> None:
         """process_translate should handle finance metering failures gracefully."""
-        from apps.translate.services import process_translate
+        from apps.language.translate.services import process_translate
 
         translate_yaml = tmp_path / "translate.yaml"
         translate_yaml.write_text(
@@ -367,14 +368,14 @@ class TestTranslationErrorHandling:
         task.save = AsyncMock(return_value=task)
 
         with (
-            patch("apps.translate.services.Settings") as mock_settings,
+            patch("apps.language.translate.services.Settings") as mock_settings,
             patch(
-                "apps.translate.services.call_openrouter",
+                "apps.language.translate.services.call_openrouter",
                 new_callable=AsyncMock,
                 return_value="Ciao mondo",
             ),
             patch(
-                "apps.translate.services.finance.meter_cost",
+                "apps.language.translate.services.finance.meter_cost",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("Metering service unavailable"),
             ),

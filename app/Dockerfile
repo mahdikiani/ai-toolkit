@@ -18,10 +18,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed site-packages from build stage
-COPY --from=fast-uv /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=fast-uv /usr/local/lib/python3.12/site-packages \
+                    /usr/local/lib/python3.12/site-packages
 
-RUN adduser --disabled-password --gecos '' user \
-    && mkdir /app/logs \
+RUN addgroup --system --gid 1000 user \
+    && adduser --system --uid 1000 --ingroup user --disabled-password --gecos '' --home /home/user user \
+    # && mkdir -p /home/user \
+    # && chown -R user:user /home/user \
+    && mkdir -p /app/logs \
     && chown -R user:user /app/logs
 
 USER user

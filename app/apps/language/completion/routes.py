@@ -9,7 +9,7 @@ from usso.integrations.fastapi import USSOAuthentication
 
 from .services import proxy_chat_completions, proxy_chat_completions_raw_stream
 
-router = APIRouter(prefix="/completion", tags=["Completion"])
+router = APIRouter(prefix="/chat", tags=["Completion"])
 auth_dependency = USSOAuthentication()
 
 
@@ -18,7 +18,7 @@ async def _require_user(request: Request) -> object:
     return await auth_dependency(request)
 
 
-@router.post("/v1/chat/completions")
+@router.post("/completions")
 async def openai_compatible_chat_completions(request: Request):  # noqa: ANN201
     """Proxy an OpenAI-compatible chat completion request to configured providers."""
     user = await _require_user(request)

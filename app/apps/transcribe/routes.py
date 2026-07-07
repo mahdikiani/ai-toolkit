@@ -1,8 +1,9 @@
 """Transcribe API routes for audio transcription task management."""
 
+import base64
 from io import BytesIO
 
-from fastapi import BackgroundTasks, Query, Request
+from fastapi import BackgroundTasks, Depends, File, Query, Request, UploadFile
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi_mongo_base.routes import AbstractTaskRouter, PaginatedResponse
 from fastapi_mongo_base.utils import usso_routes
@@ -14,7 +15,12 @@ from utils import speechmatics
 
 from . import services
 from .models import TranscribeTask
-from .schemas import TranscribeTaskSchema, TranscribeTaskSchemaCreate
+from .schemas import (
+    TranscribeTaskBase64Schema,
+    TranscribeTaskSchema,
+    TranscribeTaskSchemaCreate,
+    TranscribeTaskUploadFormSchema,
+)
 
 
 class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
@@ -46,6 +52,16 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
             self.webhook_chunk,
             methods=["POST"],
             status_code=200,
+        )
+        self.router.add_api_route(
+            "/upload/file",
+            self.create_item_with_upload,
+            methods=["POST"],
+        )
+        self.router.add_api_route(
+            "/upload/base64",
+            self.create_item_with_base64,
+            methods=["POST"],
         )
         self.router.add_api_route(
             "/{uid}/result",
@@ -103,6 +119,45 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
             BytesIO((task.result or "").encode("utf-8")),
             media_type="text/plain",
             headers={"Content-Disposition": 'attachment; filename="result.txt"'},
+        )
+
+    async def create_item_with_upload(
+        self,
+        request: Request,
+        background_tasks: BackgroundTasks,
+        file: UploadFile = File(...),
+        data_form: TranscribeTaskUploadFormSchema = Depends(
+            TranscribeTaskUploadFormSchema.as_form
+        ),
+        blocking: bool = Query(False),
+    ) -> TranscribeTask:
+        """Create a transcription task from a direct multipart upload."""
+        file_content = await file.read()
+        encoded_file = base64.b64encode(file_content).decode("utf-8")
+        mime_type = file.content_type or "application/octet-stream"
+        data = TranscribeTaskSchemaCreate(
+            file_url=f"data:{mime_type};base64,{encoded_file}",
+            audio_duration_seconds=data_form.audio_duration_seconds,
+            provider=data_form.provider,
+            model=data_form.model,
+            user_id=data_form.user_id,
+            webhook_url=data_form.webhook_url,
+        )
+        return await self.create_item(request, data, background_tasks, blocking)
+
+    async def create_item_with_base64(
+        self,
+        request: Request,
+        data: TranscribeTaskBase64Schema,
+        background_tasks: BackgroundTasks,
+        blocking: bool = Query(False),
+    ) -> TranscribeTask:
+        """Create a transcription task from a base64 encoded payload."""
+        return await self.create_item(
+            request,
+            data.to_create_schema(),
+            background_tasks,
+            blocking,
         )
 
     async def webhook(

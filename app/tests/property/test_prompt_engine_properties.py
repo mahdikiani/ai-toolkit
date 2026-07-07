@@ -10,9 +10,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from apps.executions.engine.engine import PromptEngine, _yaml_schema_to_json_schema
 from hypothesis import given, settings
 from hypothesis import strategies as st
+
+from apps.language.promptic.engine.engine import (
+    PromptEngine,
+    _yaml_schema_to_json_schema,
+)
 
 # Strategy for valid identifier-like keys (no special chars)
 identifier_strategy = st.text(

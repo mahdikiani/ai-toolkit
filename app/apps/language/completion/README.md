@@ -12,4 +12,4 @@ Completion exposes OpenAI-compatible proxy endpoints.
 
 ## API
 
-- `POST /api/ai/v1/completion/v1/chat/completions`
+- `POST /api/ai/v1/chat/completions`

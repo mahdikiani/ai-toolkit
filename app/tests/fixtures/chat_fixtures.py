@@ -3,7 +3,8 @@
 import contextlib
 
 import pytest_asyncio
-from apps.chat.models import ChatMessage, ChatSession, ChatThread
+
+from apps.language.chat.models import ChatMessage, ChatSession, ChatThread
 
 
 @pytest_asyncio.fixture

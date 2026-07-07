@@ -60,3 +60,23 @@ class TestTranscribeRoutes:
             json={"id": "job_123", "status": "COMPLETED"},
         )
         assert response.status_code in (401, 403, 404, 422)
+
+    async def test_upload_file_endpoint_without_auth(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        """POST /transcribes/upload/file without auth should return 401."""
+        response = await client.post(
+            "/transcribes/upload/file",
+            files={"file": ("audio.wav", b"fake audio", "audio/wav")},
+        )
+        assert response.status_code in (401, 403)
+
+    async def test_upload_base64_endpoint_without_auth(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        """POST /transcribes/upload/base64 without auth should return 401."""
+        response = await client.post(
+            "/transcribes/upload/base64",
+            json={"content_base64": "ZmFrZSBhdWRpbw==", "mime_type": "audio/wav"},
+        )
+        assert response.status_code in (401, 403)

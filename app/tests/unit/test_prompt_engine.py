@@ -3,7 +3,8 @@
 from pathlib import Path
 
 import pytest
-from apps.executions.engine.engine import (
+
+from apps.language.promptic.engine.engine import (
     PromptEngine,
     _render_value,
     _yaml_schema_to_json_schema,

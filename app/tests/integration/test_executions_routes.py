@@ -45,7 +45,7 @@ class TestPrompticRoutes:
         self, authenticated_client: httpx.AsyncClient, tmp_path: Path
     ) -> None:
         """POST /promptic with missing prompt should return 404."""
-        with patch("apps.executions.services.Settings") as mock_settings:
+        with patch("apps.language.promptic.services.Settings") as mock_settings:
             mock_settings.prompts_dir = tmp_path  # Empty dir, no prompts
 
             response = await authenticated_client.post(

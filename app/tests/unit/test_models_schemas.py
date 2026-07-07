@@ -1,18 +1,23 @@
 """Unit tests for Pydantic schemas and data models."""
 
 import pytest
-from apps.chat.schemas import (
+from fastapi_mongo_base.tasks import TaskStatusEnum
+from pydantic import ValidationError
+
+from apps.language.chat.schemas import (
     ChatMessageCreate,
     ChatMessageSchema,
     ChatSessionCreate,
     ChatThreadCreate,
     ChatThreadSchema,
 )
-from apps.executions.schemas import ExecutionTaskCreate, ExecutionTaskSchema
-from apps.translate.schemas import TranslateSchemaCreate
-from fastapi_mongo_base.tasks import TaskStatusEnum
-from pydantic import ValidationError
-
+from apps.language.promptic.schemas import (
+    PrompticCreate as ExecutionTaskCreate,
+)
+from apps.language.promptic.schemas import (
+    PrompticSchema as ExecutionTaskSchema,
+)
+from apps.language.translate.schemas import TranslateSchemaCreate
 from apps.ocr.schemas import OcrEngineType, OcrTaskSchemaCreate
 from apps.transcribe.schemas import TranscribeTaskSchemaCreate
 

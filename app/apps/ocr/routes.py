@@ -19,7 +19,12 @@ from usso.integrations.fastapi import USSOAuthentication
 from server.config import Settings
 
 from .models import OcrTask
-from .schemas import OcrTaskSchema, OcrTaskSchemaCreate, OcrTaskUploadFormSchema
+from .schemas import (
+    OcrTaskBase64Schema,
+    OcrTaskSchema,
+    OcrTaskSchemaCreate,
+    OcrTaskUploadFormSchema,
+)
 
 
 class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
@@ -54,6 +59,11 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         self.router.add_api_route(
             "/upload",
             self.create_item_with_upload,
+            methods=["POST"],
+        )
+        self.router.add_api_route(
+            "/upload/base64",
+            self.create_item_with_base64,
             methods=["POST"],
         )
 
@@ -135,6 +145,21 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         return await self.create_item(
             request=request,
             data=data,
+            background_tasks=background_tasks,
+            blocking=blocking,
+        )
+
+    async def create_item_with_base64(
+        self,
+        request: Request,
+        data: OcrTaskBase64Schema,
+        background_tasks: BackgroundTasks,
+        blocking: bool = Query(False),
+    ) -> OcrTask:
+        """Create an OCR task from a base64 encoded payload."""
+        return await self.create_item(
+            request=request,
+            data=data.to_create_schema(),
             background_tasks=background_tasks,
             blocking=blocking,
         )

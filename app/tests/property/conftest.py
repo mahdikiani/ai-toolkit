@@ -2,7 +2,14 @@
 
 import os
 
-from hypothesis import HealthCheck, settings
+import pytest
+
+hypothesis = pytest.importorskip(
+    "hypothesis",
+    reason="property tests require the optional hypothesis dependency",
+)
+HealthCheck = hypothesis.HealthCheck
+settings = hypothesis.settings
 
 # Configure Hypothesis profiles
 settings.register_profile(

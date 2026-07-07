@@ -15,6 +15,23 @@ from .saas import QuotaSchema, UsageCreateSchema, UsageSchema
 resource_variant = getattr(Settings, "UFAAS_RESOURCE_VARIANT", "")
 
 
+def _insufficient_funds_error(message: str) -> exceptions.InsufficientFundsError:
+    """Build an InsufficientFundsError across compatible ufaas versions."""
+    try:
+        return exceptions.InsufficientFundsError(message)
+    except TypeError:
+        error = exceptions.InsufficientFundsError.__new__(
+            exceptions.InsufficientFundsError
+        )
+        Exception.__init__(error, 402, message)
+        error.status_code = 402
+        error.error_code = "insufficient_funds"
+        error.detail = message
+        error.message = {"en": message}
+        error.data = {}
+        return error
+
+
 DEFAULT_PRICING: dict[str, Any] = {
     "text": {
         "markup": 1.0,
@@ -197,7 +214,7 @@ async def check_quota(
     """
     quota = await get_quota(user_id)
     if raise_exception and (quota is None or quota < coin):
-        raise exceptions.InsufficientFundsError(
+        raise _insufficient_funds_error(
             f"You have only {quota} coins, while you need {coin} coins."
         )
     return quota

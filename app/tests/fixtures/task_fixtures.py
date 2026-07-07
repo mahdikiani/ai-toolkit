@@ -3,9 +3,9 @@
 import contextlib
 
 import pytest_asyncio
-from apps.executions.models import ExecutionTask
-from apps.translate.models import TranslateTask
 
+from apps.language.promptic.models import PrompticTask
+from apps.language.translate.models import TranslateTask
 from apps.ocr.models import OcrTask
 from apps.transcribe.models import TranscribeTask
 
@@ -60,12 +60,12 @@ async def translate_task(mock_user: dict) -> TranslateTask:
 
 
 @pytest_asyncio.fixture
-async def execution_task(mock_user: dict) -> ExecutionTask:
+async def execution_task(mock_user: dict) -> PrompticTask:
     """Create a test execution task."""
     import hashlib
 
     idempotency_key = hashlib.sha256(b"test_prompt:test_input").hexdigest()
-    task = await ExecutionTask.create_item(
+    task = await PrompticTask.create_item(
         {
             "user_id": mock_user["user_id"],
             "tenant_id": mock_user["tenant_id"],

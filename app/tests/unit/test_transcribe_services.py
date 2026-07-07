@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
-from apps.transcribe.schemas import ChunkMetadata, TranscribeTaskSchema
+from apps.transcribe.schemas import (
+    ChunkMetadata,
+    TranscribeTaskBase64Schema,
+    TranscribeTaskSchema,
+)
 from apps.transcribe.services import (
     _combine_chunk_texts,
     save_error,
@@ -67,6 +71,24 @@ class TestTranscribeAudioDuration:
         )
 
         assert task.audio_duration == pytest.approx(0.0)
+
+
+@pytest.mark.unit
+class TestTranscribeBase64Schema:
+    """Tests for base64 transcription upload schema conversion."""
+
+    def test_to_create_schema_builds_data_url(self) -> None:
+        """Base64 payloads should be converted to data URLs."""
+        data = TranscribeTaskBase64Schema(
+            content_base64="ZmFrZQ==",
+            mime_type="audio/wav",
+            audio_duration_seconds=1.5,
+        )
+
+        create_schema = data.to_create_schema()
+
+        assert create_schema.file_url == "data:audio/wav;base64,ZmFrZQ=="
+        assert create_schema.audio_duration_seconds == pytest.approx(1.5)
 
 
 @pytest.mark.unit

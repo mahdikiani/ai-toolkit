@@ -2,9 +2,7 @@
 
 import logging
 import os
-import sys
 from collections.abc import AsyncGenerator, Generator
-from importlib import import_module
 
 import httpx
 import pytest
@@ -14,35 +12,12 @@ from fastapi_mongo_base import models as base_mongo_models
 from fastapi_mongo_base.utils.basic import get_all_subclasses
 
 from server.config import Settings
-
-
-def _install_legacy_test_aliases() -> None:
-    """Map old test imports to canonical app modules during test collection."""
-    aliases = {
-        "apps.chat": "apps.language.chat",
-        "apps.chat.models": "apps.language.chat.models",
-        "apps.chat.schemas": "apps.language.chat.schemas",
-        "apps.chat.services": "apps.language.chat.services",
-        "apps.translate": "apps.language.translate",
-        "apps.translate.models": "apps.language.translate.models",
-        "apps.translate.schemas": "apps.language.translate.schemas",
-        "apps.translate.services": "apps.language.translate.services",
-        "apps.executions": "apps.language.promptic",
-        "apps.executions.models": "apps.language.promptic.models",
-        "apps.executions.schemas": "apps.language.promptic.schemas",
-        "apps.executions.services": "apps.language.promptic.services",
-        "apps.executions.engine": "apps.language.promptic.engine",
-        "apps.executions.engine.engine": "apps.language.promptic.engine.engine",
-    }
-    for old_name, new_name in aliases.items():
-        sys.modules.setdefault(old_name, import_module(new_name))
-
-
-_install_legacy_test_aliases()
-
-from server.server import app as fastapi_app  # noqa: E402
+from server.server import app as fastapi_app
 
 pytest_plugins = ["tests.fixtures.file_fixtures"]
+
+# Tests must not hit the real finance API from a developer's local .env.
+Settings.finance_api_key = None
 
 
 @pytest.fixture(scope="session", autouse=True)  # noqa: RUF076
@@ -68,6 +43,17 @@ def mongo_client() -> Generator[object]:
 async def init_db(mongo_client: object) -> None:
     """Initialize Beanie ORM with the test database."""
     database = mongo_client.get_database("test_db")  # type: ignore
+
+    original_list_collection_names = database.list_collection_names
+
+    async def list_collection_names(*args: object, **kwargs: object) -> list[str]:
+        """Compatibility wrapper for older mongomock_motor versions."""
+        kwargs.pop("authorizedCollections", None)
+        kwargs.pop("nameOnly", None)
+        return await original_list_collection_names(*args, **kwargs)
+
+    database.list_collection_names = list_collection_names
+
     await init_beanie(
         database=database,  # type: ignore
         document_models=get_all_subclasses(base_mongo_models.BaseEntity),

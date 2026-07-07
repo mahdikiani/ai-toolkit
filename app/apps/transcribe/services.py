@@ -3,9 +3,11 @@
 import asyncio
 import logging
 import math
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
+from beanie.exceptions import CollectionWasNotInitialized
 from fastapi_mongo_base.tasks import TaskStatusEnum
 from soniox import SonioxClient
 from soniox.languages import Language
@@ -123,10 +125,16 @@ async def process_transcribe(
 
 async def _process_single_job(task: TranscribeTask, *, sync: bool) -> TranscribeTask:
     soniox = get_soniox_client()
-    job = await soniox.transcribe_url_async(
-        task.file_url,
-        _build_transcription_config(task, chunk_id=None, use_webhook=True),
-    )
+    config = _build_transcription_config(task, chunk_id=None, use_webhook=True)
+    if task.file_url.startswith("data:"):
+        file_content = await task.file_content()
+        suffix = chunker._guess_extension(task.file_url)
+        with tempfile.NamedTemporaryFile(suffix=suffix) as tmp_file:
+            tmp_file.write(file_content.getvalue())
+            tmp_file.flush()
+            job = await soniox.transcribe_file_async(tmp_file.name, config)
+    else:
+        job = await soniox.transcribe_url_async(task.file_url, config)
 
     # job_id = await speechmatics.Speechmatics().create_transcribe_job(
     #     task.file_url,
@@ -150,7 +158,10 @@ async def _process_single_job(task: TranscribeTask, *, sync: bool) -> Transcribe
 
     await conditions.Conditions().wait_condition(task.uid)
 
-    finished_task = await TranscribeTask.get_item(task.uid, user_id=task.user_id)
+    try:
+        finished_task = await TranscribeTask.get_item(task.uid, user_id=task.user_id)
+    except CollectionWasNotInitialized:
+        finished_task = task
     if not finished_task or not finished_task.transcription_job_id:
         return await save_error(task, "transcription_failed")
     job_result = await soniox.get_transcription_job_async(

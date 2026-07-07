@@ -120,6 +120,35 @@ class OcrTaskUploadFormSchema(BaseModel):
         )
 
 
+class OcrTaskBase64Schema(BaseModel):
+    """Base64 upload payload for OCR tasks."""
+
+    content_base64: str = Field(..., min_length=1)
+    mime_type: str = "application/octet-stream"
+    user_id: str | None = None
+    webhook_url: str | None = None
+    webhook_custom_headers: dict | None = None
+    meta_data: dict | None = None
+    ocr_engine: OcrEngineType | None = None
+
+    def to_create_schema(self) -> OcrTaskSchemaCreate:
+        """OCR create schema represented as a data URL."""
+        encoded_payload = self.content_base64.strip()
+        file_url = (
+            encoded_payload
+            if encoded_payload.startswith("data:")
+            else f"data:{self.mime_type};base64,{encoded_payload}"
+        )
+        return OcrTaskSchemaCreate(
+            file_url=file_url,
+            user_id=self.user_id,
+            webhook_url=self.webhook_url,
+            webhook_custom_headers=self.webhook_custom_headers,
+            meta_data=self.meta_data,
+            ocr_engine=self.ocr_engine,
+        )
+
+
 class OcrTaskSchema(UserOwnedEntitySchema, TaskMixin, OcrTaskSchemaCreate):  # type: ignore[misc]
     """Complete OCR task schema including result and usage fields."""
 

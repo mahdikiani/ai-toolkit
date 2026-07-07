@@ -45,7 +45,7 @@ from server.server import app as fastapi_app  # noqa: E402
 pytest_plugins = ["tests.fixtures.file_fixtures"]
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session", autouse=True)  # noqa: RUF076
 def setup_debugpy() -> None:
     """Set up debugpy for remote debugging if enabled."""
     if os.getenv("DEBUGPY", "False").lower() in ("true", "1", "yes"):
@@ -74,7 +74,7 @@ async def init_db(mongo_client: object) -> None:
     )
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
+@pytest_asyncio.fixture(scope="session")
 async def db(mongo_client: object) -> AsyncGenerator[None]:
     """Initialize and cleanup the test database."""
     Settings.config_logger()
@@ -86,7 +86,7 @@ async def db(mongo_client: object) -> AsyncGenerator[None]:
 
 
 @pytest_asyncio.fixture(scope="session")
-async def client() -> AsyncGenerator[httpx.AsyncClient]:
+async def client(db: None) -> AsyncGenerator[httpx.AsyncClient]:
     """Provide an AsyncClient for the FastAPI app."""
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=fastapi_app),

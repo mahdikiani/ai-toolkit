@@ -196,7 +196,7 @@ class TestSaveResult:
 
         await save_result(task, "text", usage_amount=5.0, usage_id="usage_123")
 
-        assert task.usage_amount == 5.0
+        assert task.usage_amount == pytest.approx(5.0)
         assert task.usage_id == "usage_123"
 
 
@@ -395,7 +395,7 @@ class TestOcrQuotaAndErrorHandling:
         )
 
         # Verify usage info was saved to task
-        assert result.usage_amount == 3.0
+        assert result.usage_amount == pytest.approx(3.0)
         assert result.usage_id == "usage_456"
 
     async def test_error_on_unsupported_file_type(self) -> None:

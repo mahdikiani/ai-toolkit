@@ -181,7 +181,7 @@ class Language(StrEnum):
     @property
     def fa(self) -> str:
         """
-        Get the Persian name of the language.
+        Persian name of the language.
 
         Returns:
             Persian language name.
@@ -191,7 +191,7 @@ class Language(StrEnum):
     @property
     def en(self) -> str:
         """
-        Get the English name of the language.
+        English name of the language.
 
         Returns:
             English language name.
@@ -201,7 +201,7 @@ class Language(StrEnum):
     @property
     def abbreviation(self) -> str:
         """
-        Get the language abbreviation code.
+        Language abbreviation code.
 
         Returns:
             Language abbreviation (e.g., 'en', 'fa').
@@ -299,7 +299,7 @@ class TranscribeWebhookSchema(BaseModel):
     @property
     def duration(self) -> int:
         """
-        Get the duration of the transcribed media in seconds.
+        Duration of the transcribed media in seconds.
 
         Returns:
             Duration in seconds.
@@ -309,7 +309,7 @@ class TranscribeWebhookSchema(BaseModel):
     @property
     def job_id(self) -> str:
         """
-        Get the unique job identifier.
+        Unique job identifier.
 
         Returns:
             Job ID string.
@@ -319,7 +319,7 @@ class TranscribeWebhookSchema(BaseModel):
     @property
     def language(self) -> str:
         """
-        Get the predicted language from transcription.
+        Predicted language from transcription.
 
         Returns:
             Predicted language string.

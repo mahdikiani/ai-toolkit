@@ -118,7 +118,7 @@ async def stream_chat_deltas(
                 if delta == "[DONE]":
                     break
                 if delta:
-                    yield delta
+                    yield delta  # noqa: ASYNC119
     except httpx.HTTPStatusError as e:
         raise RuntimeError(
             f"OpenRouter HTTP {e.response.status_code}: {e.response.text}"
@@ -165,4 +165,4 @@ async def stream_chat_completion_bytes(
             )
         async for chunk in resp.aiter_bytes():
             if chunk:
-                yield chunk
+                yield chunk  # noqa: ASYNC119

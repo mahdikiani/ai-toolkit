@@ -66,7 +66,7 @@ class TranscribeTaskSchema(  # type: ignore[misc]
 
     @property
     def audio_duration(self) -> float:
-        """Return known audio duration in seconds without network/file I/O."""
+        """Known audio duration in seconds without network/file I/O."""
         if self.audio_duration_seconds is not None:
             return self.audio_duration_seconds
 

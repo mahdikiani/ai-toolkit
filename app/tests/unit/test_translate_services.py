@@ -37,7 +37,7 @@ class TestSaveResult:
 
         await save_result(task, "text", usage_amount=1.0, usage_id="usage_789")
 
-        assert task.usage_amount == 1.0
+        assert task.usage_amount == pytest.approx(1.0)
         assert task.usage_id == "usage_789"
 
 

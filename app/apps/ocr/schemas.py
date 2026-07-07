@@ -130,5 +130,5 @@ class OcrTaskSchema(UserOwnedEntitySchema, TaskMixin, OcrTaskSchemaCreate):  # t
 
     @property
     def webhook_exclude_fields(self) -> set[str]:
-        """Return fields to exclude from webhook payload."""
+        """Fields excluded from webhook payloads."""
         return {"result"}

@@ -26,7 +26,7 @@ class TestTranscribeAudioDuration:
             audio_duration_seconds=12.5,
         )
 
-        assert task.audio_duration == 12.5
+        assert task.audio_duration == pytest.approx(12.5)
 
     def test_uses_provider_meta_duration(self) -> None:
         """audio_duration should use persisted provider usage metadata."""
@@ -56,7 +56,7 @@ class TestTranscribeAudioDuration:
             ],
         )
 
-        assert task.audio_duration == 2.5
+        assert task.audio_duration == pytest.approx(2.5)
 
     def test_unknown_duration_is_zero(self) -> None:
         """audio_duration should not guess when no metadata is available."""
@@ -66,7 +66,7 @@ class TestTranscribeAudioDuration:
             file_url="https://example.com/audio.mp3",
         )
 
-        assert task.audio_duration == 0.0
+        assert task.audio_duration == pytest.approx(0.0)
 
 
 @pytest.mark.unit
@@ -211,7 +211,7 @@ class TestSaveResult:
 
         await save_result(task, "text", usage_amount=10.0, usage_id="usage_456")
 
-        assert task.usage_amount == 10.0
+        assert task.usage_amount == pytest.approx(10.0)
         assert task.usage_id == "usage_456"
 
 
@@ -485,7 +485,7 @@ class TestTranscriptionQuotaAndMetering:
         # Verify metering was called
         mock_meter.assert_called_once()
         # Cost should be ceil((60000 / 60 / 1000) * 10) = 10
-        assert mock_meter.call_args[0][1] == 1.0
+        assert mock_meter.call_args[0][1] == pytest.approx(1.0)
 
 
 @pytest.mark.unit

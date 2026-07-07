@@ -1,17 +1,11 @@
 """Simple archive utilities - extract to temp directory, compress from directory."""
 
 import asyncio
-import bz2
-import gzip
 import shutil
-import tarfile
-import tempfile
-import zipfile
 from collections.abc import Awaitable, Callable
 from io import BytesIO
 from pathlib import Path
 
-import zstandard as zstd
 from anyio import Path as AsyncPath
 
 COMPRESSED_EXTS = {
@@ -30,6 +24,8 @@ COMPRESSED_EXTS = {
 
 def _extract_zip(file_content: BytesIO, temp_dir: Path) -> list[Path]:
     """Extract ZIP file to temp directory."""
+    import zipfile
+
     extracted_paths = []
     with zipfile.ZipFile(file_content) as zip_file:
         for file_info in zip_file.filelist:
@@ -44,6 +40,8 @@ def _extract_zip(file_content: BytesIO, temp_dir: Path) -> list[Path]:
 
 def _extract_tar(file_content: BytesIO, temp_dir: Path) -> list[Path]:
     """Extract TAR file to temp directory."""
+    import tarfile
+
     extracted_paths = []
     with tarfile.open(fileobj=file_content, mode="r") as tar_file:
         for member in tar_file.getmembers():
@@ -74,6 +72,12 @@ def extract_archive(
     file_content: BytesIO, file_type: str
 ) -> tuple[Path, list[Path]] | None:
     """Extract any supported archive to a temporary directory."""
+    import bz2
+    import gzip
+    import tempfile
+
+    import zstandard as zstd
+
     temp_dir = Path(tempfile.mkdtemp())
 
     try:
@@ -106,6 +110,8 @@ def extract_archive(
 
 def compress_directory_to_zip(directory: Path) -> BytesIO:
     """Compress a directory to ZIP and return as BytesIO."""
+    import zipfile
+
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for file_path in directory.rglob("*"):

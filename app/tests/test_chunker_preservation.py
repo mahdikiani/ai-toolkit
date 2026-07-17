@@ -15,9 +15,11 @@ Property 2: Preservation - Audio Chunking Behavior Unchanged
 
 from __future__ import annotations
 
+import asyncio
 import json
-import subprocess
+import shutil
 import tempfile
+from asyncio.subprocess import PIPE
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,12 +28,39 @@ import pytest
 # Import the ffmpeg-based chunker (current implementation)
 from apps.transcribe import chunker_ffmpeg as chunker
 
+FFMPEG = shutil.which("ffmpeg")
+FFPROBE = shutil.which("ffprobe")
+
+
+async def _run_media_command(executable: str, arguments: list[str]) -> str:
+    process = await asyncio.create_subprocess_exec(
+        executable,
+        *arguments,
+        stdout=PIPE,
+        stderr=PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    if process.returncode:
+        raise RuntimeError(stderr.decode())
+    return stdout.decode()
+
+
+def _create_audio(output_path: Path, *arguments: str) -> None:
+    assert FFMPEG is not None
+    asyncio.run(_run_media_command(FFMPEG, [*arguments, str(output_path)]))
+
+
+def _probe_audio(*arguments: str) -> str:
+    assert FFPROBE is not None
+    return asyncio.run(_run_media_command(FFPROBE, list(arguments)))
+
 
 class TestAudioDurationPreservation:
     """
     Test that audio duration calculation remains consistent.
 
-    **Validates: Requirement 3.1** - Audio files loaded from URLs are processed correctly
+    **Validates: Requirement 3.1** - Audio files loaded from URLs are processed
+    correctly
     """
 
     def test_get_audio_duration_returns_positive_integer(self) -> None:
@@ -46,9 +75,9 @@ class TestAudioDurationPreservation:
             tmp_path = Path(tmp.name)
             try:
                 # Create a 1-second silent audio file using ffmpeg
-                subprocess.run(
-                    [
-                        "ffmpeg",
+                _create_audio(
+                    tmp_path,
+                    *[
                         "-y",
                         "-f",
                         "lavfi",
@@ -60,10 +89,7 @@ class TestAudioDurationPreservation:
                         "9",
                         "-acodec",
                         "libmp3lame",
-                        str(tmp_path),
                     ],
-                    capture_output=True,
-                    check=True,
                 )
 
                 duration_ms = chunker._get_audio_duration_ms(tmp_path)
@@ -95,9 +121,9 @@ class TestAudioDurationPreservation:
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
                 tmp_path = Path(tmp.name)
                 try:
-                    subprocess.run(
-                        [
-                            "ffmpeg",
+                    _create_audio(
+                        tmp_path,
+                        *[
                             "-y",
                             "-f",
                             "lavfi",
@@ -109,10 +135,7 @@ class TestAudioDurationPreservation:
                             "9",
                             "-acodec",
                             "libmp3lame",
-                            str(tmp_path),
                         ],
-                        capture_output=True,
-                        check=True,
                     )
 
                     duration_ms = chunker._get_audio_duration_ms(tmp_path)
@@ -145,9 +168,9 @@ class TestSilenceDetectionPreservation:
             tmp_path = Path(tmp.name)
             try:
                 # Create audio with silence: 0.5s sound, 1s silence, 0.5s sound
-                subprocess.run(
-                    [
-                        "ffmpeg",
+                _create_audio(
+                    tmp_path,
+                    *[
                         "-y",
                         "-f",
                         "lavfi",
@@ -165,10 +188,7 @@ class TestSilenceDetectionPreservation:
                         "[0:a][1:a][2:a]concat=n=3:v=0:a=1",
                         "-acodec",
                         "libmp3lame",
-                        str(tmp_path),
                     ],
-                    capture_output=True,
-                    check=True,
                 )
 
                 silence_ranges = chunker._detect_silence_ffmpeg(
@@ -210,9 +230,9 @@ class TestSilenceDetectionPreservation:
             tmp_path = Path(tmp.name)
             try:
                 # Create audio with varying volume levels
-                subprocess.run(
-                    [
-                        "ffmpeg",
+                _create_audio(
+                    tmp_path,
+                    *[
                         "-y",
                         "-f",
                         "lavfi",
@@ -222,10 +242,7 @@ class TestSilenceDetectionPreservation:
                         "volume=0.1",  # Low volume (might be detected as silence)
                         "-acodec",
                         "libmp3lame",
-                        str(tmp_path),
                     ],
-                    capture_output=True,
-                    check=True,
                 )
 
                 # Detect with strict threshold (less sensitive)
@@ -301,7 +318,8 @@ class TestChunkBoundaryPreservation:
             # Last chunk can be shorter than min_chunk_ms
             if idx == len(cut_points) - 1:
                 assert chunk_duration <= max_chunk_ms, (
-                    f"Chunk {idx} duration {chunk_duration}ms exceeds max {max_chunk_ms}ms"
+                    f"Chunk {idx} duration {chunk_duration}ms exceeds max "
+                    f"{max_chunk_ms}ms"
                 )
             else:
                 assert min_chunk_ms <= chunk_duration <= max_chunk_ms, (
@@ -337,7 +355,8 @@ class TestChunkBoundaryPreservation:
 
             # Cut point should be at or near the silence midpoint
             assert abs(first_cut - silence_midpoint) <= 2000, (
-                f"Cut point {first_cut} should be near silence midpoint {silence_midpoint}"
+                f"Cut point {first_cut} should be near silence midpoint "
+                f"{silence_midpoint}"
             )
 
 
@@ -360,9 +379,9 @@ class TestAudioExportPreservation:
             source_path = Path(source_tmp.name)
             try:
                 # Create a 3-second audio file
-                subprocess.run(
-                    [
-                        "ffmpeg",
+                _create_audio(
+                    source_path,
+                    *[
                         "-y",
                         "-f",
                         "lavfi",
@@ -370,10 +389,7 @@ class TestAudioExportPreservation:
                         "sine=frequency=1000:duration=3",
                         "-acodec",
                         "libmp3lame",
-                        str(source_path),
                     ],
-                    capture_output=True,
-                    check=True,
                 )
 
                 with tempfile.NamedTemporaryFile(
@@ -394,22 +410,16 @@ class TestAudioExportPreservation:
                         assert output_path.exists(), "Output file must be created"
 
                         # Property: Output file must be valid audio
-                        result = subprocess.run(
-                            [
-                                "ffprobe",
-                                "-v",
-                                "error",
-                                "-show_entries",
-                                "format=duration",
-                                "-of",
-                                "json",
-                                str(output_path),
-                            ],
-                            capture_output=True,
-                            text=True,
-                            check=True,
+                        output = _probe_audio(
+                            "-v",
+                            "error",
+                            "-show_entries",
+                            "format=duration",
+                            "-of",
+                            "json",
+                            str(output_path),
                         )
-                        data = json.loads(result.stdout)
+                        data = json.loads(output)
                         exported_duration = float(data["format"]["duration"])
 
                         # Property: Exported duration should match requested duration
@@ -433,9 +443,9 @@ class TestAudioExportPreservation:
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as source_tmp:
             source_path = Path(source_tmp.name)
             try:
-                subprocess.run(
-                    [
-                        "ffmpeg",
+                _create_audio(
+                    source_path,
+                    *[
                         "-y",
                         "-f",
                         "lavfi",
@@ -443,10 +453,7 @@ class TestAudioExportPreservation:
                         "sine=frequency=1000:duration=1",
                         "-acodec",
                         "libmp3lame",
-                        str(source_path),
                     ],
-                    capture_output=True,
-                    check=True,
                 )
 
                 for output_format in ["mp3", "wav"]:
@@ -464,22 +471,16 @@ class TestAudioExportPreservation:
                             )
 
                             # Property: Output file format matches requested format
-                            result = subprocess.run(
-                                [
-                                    "ffprobe",
-                                    "-v",
-                                    "error",
-                                    "-show_entries",
-                                    "format=format_name",
-                                    "-of",
-                                    "json",
-                                    str(output_path),
-                                ],
-                                capture_output=True,
-                                text=True,
-                                check=True,
+                            output = _probe_audio(
+                                "-v",
+                                "error",
+                                "-show_entries",
+                                "format=format_name",
+                                "-of",
+                                "json",
+                                str(output_path),
                             )
-                            data = json.loads(result.stdout)
+                            data = json.loads(output)
                             format_name = data["format"]["format_name"]
 
                             # Format name might be compound (e.g., "mp3" or "wav")
@@ -494,9 +495,10 @@ class TestAudioExportPreservation:
 
 class TestChunkPlanAPIPreservation:
     """
-    Test that ChunkPlan, AudioChunk, and ChunkTranscriptionResult APIs remain unchanged.
+    Test preservation of ChunkPlan API models.
 
-    **Validates: Requirement 3.5** - Model APIs maintain same interface and data structures
+    **Validates: Requirement 3.5** - Model APIs maintain the same interface and
+    data structures
     """
 
     def test_audio_chunk_model_has_required_fields(self) -> None:
@@ -510,7 +512,7 @@ class TestChunkPlanAPIPreservation:
             chunk_id=0,
             start_ms=1000,
             end_ms=3000,
-            file_path=Path("/tmp/chunk_0000.mp3"),
+            file_path=Path("chunk_0000.mp3"),
         )
 
         # Property: All required fields must be accessible
@@ -571,7 +573,7 @@ class TestChunkPlanAPIPreservation:
             chunk_id=0,
             start_ms=0,
             end_ms=1000,
-            file_path=Path("/tmp/chunk_0000.mp3"),
+            file_path=Path("chunk_0000.mp3"),
         )
 
         result = chunker.ChunkTranscriptionResult(
@@ -616,9 +618,10 @@ class TestChunkPlanIntegrationPreservation:
 
             # Create a short audio file (1 second)
             audio_file = Path(tmpdir) / "short_audio.mp3"
-            subprocess.run(
-                [
-                    "ffmpeg",
+            await asyncio.to_thread(
+                _create_audio,
+                audio_file,
+                *[
                     "-y",
                     "-f",
                     "lavfi",
@@ -626,10 +629,7 @@ class TestChunkPlanIntegrationPreservation:
                     "sine=frequency=1000:duration=1",
                     "-acodec",
                     "libmp3lame",
-                    str(audio_file),
                 ],
-                capture_output=True,
-                check=True,
             )
 
             # Mock the download to use local file
@@ -638,9 +638,7 @@ class TestChunkPlanIntegrationPreservation:
             ) as mock_download:
 
                 async def copy_file(file_url: str, destination: Path) -> None:
-                    import shutil
-
-                    shutil.copy(audio_file, destination)
+                    await asyncio.to_thread(shutil.copy, audio_file, destination)
 
                 mock_download.side_effect = copy_file
 
@@ -685,9 +683,10 @@ class TestChunkPlanIntegrationPreservation:
             storage_root.mkdir()
 
             audio_file = Path(tmpdir) / "test_audio.mp3"
-            subprocess.run(
-                [
-                    "ffmpeg",
+            await asyncio.to_thread(
+                _create_audio,
+                audio_file,
+                *[
                     "-y",
                     "-f",
                     "lavfi",
@@ -695,10 +694,7 @@ class TestChunkPlanIntegrationPreservation:
                     "sine=frequency=1000:duration=1",
                     "-acodec",
                     "libmp3lame",
-                    str(audio_file),
                 ],
-                capture_output=True,
-                check=True,
             )
 
             with patch(
@@ -706,9 +702,7 @@ class TestChunkPlanIntegrationPreservation:
             ) as mock_download:
 
                 async def copy_file(file_url: str, destination: Path) -> None:
-                    import shutil
-
-                    shutil.copy(audio_file, destination)
+                    await asyncio.to_thread(shutil.copy, audio_file, destination)
 
                 mock_download.side_effect = copy_file
 
@@ -771,7 +765,8 @@ Expected Behaviors (from Requirements 3.1-3.8):
 5. API Interface (3.5):
    - AudioChunk: chunk_id, start_ms, end_ms, file_path, duration_ms
    - ChunkPlan: duration_ms, chunks, workspace, cleanup()
-   - ChunkTranscriptionResult: chunk, job_id, text, audio_duration_ms, transcription_cost
+   - ChunkTranscriptionResult: chunk, job_id, text, audio_duration_ms,
+     transcription_cost
 
 6. Integration (3.6):
    - Short audio (< max_chunk_ms) produces single chunk

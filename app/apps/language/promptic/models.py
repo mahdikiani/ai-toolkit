@@ -1,6 +1,6 @@
 """Models for promptic task management."""
 
-from typing import ClassVar, Self
+from typing import ClassVar
 
 from fastapi_mongo_base.models import UserOwnedEntity
 from fastapi_mongo_base.tasks import TaskStatusEnum
@@ -9,7 +9,7 @@ from pymongo import ASCENDING, IndexModel
 from .schemas import PrompticSchema
 
 
-class PrompticTask(UserOwnedEntity, PrompticSchema):  # type: ignore[misc]
+class PrompticTask(UserOwnedEntity, PrompticSchema):
     """
     Promptic task for prompt template invocations.
 
@@ -34,12 +34,12 @@ class PrompticTask(UserOwnedEntity, PrompticSchema):  # type: ignore[misc]
 
     async def start_processing(
         self, *, force_restart: bool = False, sync: bool = False, **kwargs: object
-    ) -> Self:
+    ) -> "PrompticTask":
         """Start background processing of the prompt template."""
         from . import services
 
         self.task_status = TaskStatusEnum.processing
-        return await services.process_promptic(  # type: ignore[return-value]
+        return await services.process_promptic(
             self, force_restart=force_restart, sync=sync, **kwargs
         )
 

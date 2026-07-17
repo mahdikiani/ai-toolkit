@@ -3,32 +3,40 @@
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response, StreamingResponse
-from usso.integrations.fastapi import USSOAuthentication
+from fastapi_mongo_base.errors import BadRequestError
+from usso import UserData
+
+from utils.usso import get_usso
 
 from .services import proxy_chat_completions, proxy_chat_completions_raw_stream
 
 router = APIRouter(prefix="/chat", tags=["Completion"])
-auth_dependency = USSOAuthentication()
-
-
-async def _require_user(request: Request) -> object:
-    """Require USSO authentication and return the authenticated user."""
-    return await auth_dependency(request)
+auth_dependency = get_usso(raise_exception=True)
 
 
 @router.post("/completions")
-async def openai_compatible_chat_completions(request: Request):  # noqa: ANN201
+async def openai_compatible_chat_completions(
+    request: Request,
+    user: UserData = Depends(auth_dependency),
+) -> Response:
     """Proxy an OpenAI-compatible chat completion request to configured providers."""
-    user = await _require_user(request)
     try:
         body = await request.json()
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail="Invalid JSON body") from e
+        raise BadRequestError(
+            error_code="invalid_json",
+            detail="Invalid JSON body",
+            message={"en": "Invalid JSON body"},
+        ) from e
 
     if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+        raise BadRequestError(
+            error_code="invalid_body",
+            detail="Body must be a JSON object",
+            message={"en": "Body must be a JSON object"},
+        )
 
     if body.get("stream") is True:
 

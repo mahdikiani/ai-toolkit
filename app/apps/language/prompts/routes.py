@@ -1,6 +1,8 @@
 """Routes for prompt management."""
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
+from fastapi_mongo_base.core.exceptions import BaseHTTPException
+from fastapi_mongo_base.errors import NotFoundError
 
 from server.config import Settings
 
@@ -41,9 +43,10 @@ async def get_prompt_schema(request: Request, prompt_name: str) -> PromptSchemaR
     prompt_path = prompts_dir / f"{prompt_name}.yaml"
 
     if not prompt_path.exists():
-        raise HTTPException(
-            status_code=404,
+        raise NotFoundError(
+            error_code="prompt_not_found",
             detail=f"Prompt '{prompt_name}' not found",
+            message={"en": f"Prompt '{prompt_name}' not found"},
         )
 
     try:
@@ -58,7 +61,9 @@ async def get_prompt_schema(request: Request, prompt_name: str) -> PromptSchemaR
             output_schema=prompt_data["output_schema"],
         )
     except Exception as e:
-        raise HTTPException(
-            status_code=400,
+        raise BaseHTTPException(
+            status_code=422,
+            error_code="prompt_parse_error",
             detail=f"Failed to parse prompt '{prompt_name}': {e!s}",
+            message={"en": f"Failed to parse prompt '{prompt_name}'"},
         ) from e

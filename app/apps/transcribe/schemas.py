@@ -2,16 +2,19 @@
 
 import base64
 import binascii
+import json
 from io import BytesIO
 
-import httpx
 from fastapi import Form
+from fastapi_mongo_base.core.exceptions import BaseHTTPException
 from fastapi_mongo_base.schemas import UserOwnedEntitySchema
-from fastapi_mongo_base.tasks import TaskMixin
+from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import BaseModel, Field
 
+from utils.downloaders import download_bytes
 
-class TranscribeTaskSchemaCreate(BaseModel):
+
+class TranscribeTaskSchemaCreate(TaskCreateFieldsMixin):
     """Schema for creating a new transcription task."""
 
     file_url: str
@@ -22,8 +25,6 @@ class TranscribeTaskSchemaCreate(BaseModel):
     )
     provider: str = "soniox"
     model: str | None = None
-    user_id: str | None = None
-    webhook_url: str | None = None
 
     async def file_content(self) -> BytesIO:
         """Fetch and return audio file content from URL."""
@@ -41,11 +42,8 @@ class TranscribeTaskSchemaCreate(BaseModel):
             self._file_content.seek(0)
             return self._file_content
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(self.file_url)
-            self._file_content.write(response.content)
-            self._file_content.seek(0)
-            return self._file_content
+        self._file_content = await download_bytes(self.file_url)
+        return self._file_content
 
     async def file_content_base64(self) -> str:
         """Return audio file content encoded as base64 string."""
@@ -64,14 +62,12 @@ class ChunkMetadata(BaseModel):
     text: str | None = None
 
 
-class TranscribeTaskUploadFormSchema(BaseModel):
+class TranscribeTaskUploadFormSchema(TaskCreateFieldsMixin):
     """Multipart form fields for direct transcription uploads."""
 
     audio_duration_seconds: float | None = Field(default=None, ge=0)
     provider: str = "soniox"
     model: str | None = None
-    user_id: str | None = None
-    webhook_url: str | None = None
 
     @classmethod
     def as_form(
@@ -81,18 +77,34 @@ class TranscribeTaskUploadFormSchema(BaseModel):
         model: str | None = Form(None),
         user_id: str | None = Form(None),
         webhook_url: str | None = Form(None),
+        meta_data: str | None = Form(None),
     ) -> "TranscribeTaskUploadFormSchema":
         """Parse multipart form fields."""
+        try:
+            parsed_meta_data = (
+                json.loads(meta_data)
+                if isinstance(meta_data, str) and meta_data
+                else None
+            )
+        except json.JSONDecodeError as exc:
+            raise BaseHTTPException(
+                status_code=422,
+                error_code="invalid_json",
+                detail="meta_data must be valid JSON.",
+                message={"en": "meta_data must be valid JSON."},
+            ) from exc
+
         return cls(
             audio_duration_seconds=audio_duration_seconds,
             provider=provider,
             model=model,
             user_id=user_id,
             webhook_url=webhook_url,
+            meta_data=parsed_meta_data,
         )
 
 
-class TranscribeTaskBase64Schema(BaseModel):
+class TranscribeTaskBase64Schema(TaskCreateFieldsMixin):
     """Base64 upload payload for transcription tasks."""
 
     content_base64: str = Field(..., min_length=1)
@@ -100,8 +112,6 @@ class TranscribeTaskBase64Schema(BaseModel):
     audio_duration_seconds: float | None = Field(default=None, ge=0)
     provider: str = "soniox"
     model: str | None = None
-    user_id: str | None = None
-    webhook_url: str | None = None
 
     def to_create_schema(self) -> TranscribeTaskSchemaCreate:
         """Transcribe create schema represented as a data URL."""
@@ -118,10 +128,11 @@ class TranscribeTaskBase64Schema(BaseModel):
             model=self.model,
             user_id=self.user_id,
             webhook_url=self.webhook_url,
+            meta_data=self.meta_data,
         )
 
 
-class TranscribeTaskSchema(  # type: ignore[misc]
+class TranscribeTaskSchema(
     UserOwnedEntitySchema, TaskMixin, TranscribeTaskSchemaCreate
 ):
     """Complete transcription task schema including result and chunk metadata."""

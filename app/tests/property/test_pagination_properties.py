@@ -81,7 +81,7 @@ class TestPaginationInvariants:
     def test_all_items_covered_by_full_pagination(
         self, items: list, limit: int
     ) -> None:
-        """Property 4d: Paginating through all pages should cover all items exactly once."""
+        """Property 4d: Cover every item exactly once across all pages."""
         total = len(items)
         all_collected = []
         offset = 0

@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 
 import yaml
-from engine import PromptEngine, load_data
+
+from .engine import PromptEngine, load_data
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ def _main() -> None:
         if not isinstance(input_data, dict):
             logger.error("Input file must yield a dict (YAML/JSON)")
             sys.exit(1)
+            return
 
         system_p, user_p, _ = engine.generate(args.prompt, input_data)
         output = {

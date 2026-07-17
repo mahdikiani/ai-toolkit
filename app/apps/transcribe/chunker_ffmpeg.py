@@ -9,15 +9,41 @@ import json
 import logging
 import math
 import shutil
-import subprocess  # noqa: S404
+from asyncio.subprocess import PIPE
 from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel, Field
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
+
+
+class InvalidAudioPayloadError(ValueError):
+    """Raised when an inline audio payload cannot be decoded."""
+
+
+async def _run_command(cmd: list[str], *, check: bool) -> SimpleNamespace:
+    """Run a fixed-argument media command and capture its output."""
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=PIPE,
+        stderr=PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    if check and process.returncode:
+        error = RuntimeError(stderr.decode(errors="replace"))
+        raise error
+    return SimpleNamespace(
+        stdout=stdout.decode(errors="replace"), stderr=stderr.decode(errors="replace")
+    )
+
+
+def _run_media_command(cmd: list[str], *, check: bool) -> SimpleNamespace:
+    """Run an async media command from the synchronous chunking pipeline."""
+    return asyncio.run(_run_command(cmd, check=check))
 
 
 class AudioChunk(BaseModel):
@@ -95,7 +121,8 @@ async def _download_audio(file_url: str, destination: Path) -> None:
         try:
             payload = base64.b64decode(encoded_payload)
         except binascii.Error as exc:
-            raise ValueError("Invalid base64 audio payload") from exc
+            error = InvalidAudioPayloadError("Invalid base64 audio payload")
+            raise error from exc
         await asyncio.to_thread(destination.write_bytes, payload)
         return
 
@@ -168,7 +195,7 @@ def _run_chunking_pipeline(
             )
         )
 
-    LOGGER.info("Generated %s chunks for %s", len(chunks), source_path.name)
+    logger.info("Generated %s chunks for %s", len(chunks), source_path.name)
     return duration_ms, chunks
 
 
@@ -184,7 +211,7 @@ def _get_audio_duration_ms(audio_path: Path) -> int:
         "json",
         str(audio_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)  # noqa: S603
+    result = _run_media_command(cmd, check=True)
     data = json.loads(result.stdout)
     duration_seconds = float(data["format"]["duration"])
     return int(duration_seconds * 1000)
@@ -208,12 +235,7 @@ def _detect_silence_ffmpeg(
         "-",
     ]
 
-    result = subprocess.run(  # noqa: S603
-        cmd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = _run_media_command(cmd, check=False)
 
     silence_ranges: list[tuple[int, int]] = []
     lines = result.stderr.split("\n")
@@ -268,7 +290,7 @@ def _export_audio_segment(
         str(output_path),
     ]
 
-    subprocess.run(cmd, capture_output=True, check=True)  # noqa: S603
+    _run_media_command(cmd, check=True)
 
 
 def _calculate_cut_points(

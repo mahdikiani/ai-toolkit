@@ -8,7 +8,7 @@ and content type detection.
 
 from pathlib import Path
 
-from apps.language.shared.schemas import ContentType
+from .schemas import ContentType
 
 
 class FileValidationError(Exception):
@@ -31,7 +31,8 @@ def validate_file_url(file_url: str) -> bool:
         FileValidationError: If URL is invalid
     """
     if not file_url or not file_url.strip():
-        raise FileValidationError("File URL cannot be empty")
+        error = FileValidationError("File URL cannot be empty")
+        raise error
 
     # Add more validation as needed (S3 URLs, local paths, etc.)
     return True
@@ -64,7 +65,8 @@ def detect_content_type(file_url: str) -> ContentType:
     elif ext in document_extensions:
         return ContentType.DOCUMENT
     else:
-        raise FileValidationError(f"Unsupported file type: {ext}")
+        error = FileValidationError(f"Unsupported file type: {ext}")
+        raise error
 
 
 def validate_file_size(file_url: str, max_size_mb: int = 10) -> bool:

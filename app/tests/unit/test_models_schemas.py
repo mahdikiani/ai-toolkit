@@ -7,6 +7,8 @@ from pydantic import ValidationError
 from apps.language.chat.schemas import (
     ChatMessageCreate,
     ChatMessageSchema,
+    ChatQuickStartCreate,
+    ChatQuickThreadCreate,
     ChatSessionCreate,
     ChatThreadCreate,
     ChatThreadSchema,
@@ -78,6 +80,7 @@ class TestExecutionTaskSchema:
                 uid="550e8400-e29b-41d4-a716-446655440000",
                 task_status=TaskStatusEnum.init,
             )
+        assert isinstance(exc_info.value, ValidationError)
         errors = exc_info.value.errors()
         assert any(e["loc"] == ("prompt_name",) for e in errors)
 
@@ -90,6 +93,7 @@ class TestExecutionTaskSchema:
                 uid="550e8400-e29b-41d4-a716-446655440000",
                 task_status=TaskStatusEnum.init,
             )
+        assert isinstance(exc_info.value, ValidationError)
         errors = exc_info.value.errors()
         assert any(e["loc"] == ("idempotency_key",) for e in errors)
 
@@ -123,7 +127,7 @@ class TestOcrTaskSchemaCreate:
     def test_requires_file_url(self) -> None:
         """Should require file_url field."""
         with pytest.raises(ValidationError):
-            OcrTaskSchemaCreate()
+            OcrTaskSchemaCreate.model_validate({})
 
     def test_rejects_empty_file_url(self) -> None:
         """Should reject empty file_url."""
@@ -161,7 +165,7 @@ class TestTranscribeTaskSchemaCreate:
     def test_requires_file_url(self) -> None:
         """Should require file_url field."""
         with pytest.raises(ValidationError):
-            TranscribeTaskSchemaCreate()
+            TranscribeTaskSchemaCreate.model_validate({})
 
     def test_valid_creation(self) -> None:
         """Should create schema with valid file URL."""
@@ -178,7 +182,7 @@ class TestTranslateSchemaCreate:
     def test_requires_text(self) -> None:
         """Should require text field."""
         with pytest.raises(ValidationError):
-            TranslateSchemaCreate()
+            TranslateSchemaCreate.model_validate({})
 
     def test_defaults_language_to_persian(self) -> None:
         """Language should default to 'Persian'."""
@@ -217,37 +221,54 @@ class TestChatSchemas:
         """ChatMessageCreate should have correct defaults."""
         msg = ChatMessageCreate(content="Hello")
         assert msg.role == "user"
-        assert msg.generate_reply is False
+        assert msg.generate_reply is True
         assert msg.stream is False
         assert msg.reply_to_uid is None
 
+    def test_chat_quick_start_create_defaults(self) -> None:
+        """ChatQuickStartCreate should enable title suggestion by default."""
+        req = ChatQuickStartCreate(content="Hello")
+        assert req.suggest_title is True
+        assert req.title is None
+        assert req.chat_model is None
+        assert req.generate_reply is True
+
+    def test_chat_quick_thread_create_defaults(self) -> None:
+        """ChatQuickThreadCreate should enable thread title suggestion by default."""
+        req = ChatQuickThreadCreate(content="Hello")
+        assert req.suggest_thread_title is True
+        assert req.thread_title is None
+        assert req.chat_model is None
+        assert req.generate_reply is True
+
     def test_chat_message_create_valid_roles(self) -> None:
         """ChatMessageCreate should accept valid roles."""
-        for role in ["user", "assistant", "system"]:
+        for role in ("user", "assistant", "system"):
             msg = ChatMessageCreate(content="Hello", role=role)
             assert msg.role == role
 
     def test_chat_message_create_invalid_role(self) -> None:
         """ChatMessageCreate should reject invalid roles."""
         with pytest.raises(ValidationError):
-            ChatMessageCreate(content="Hello", role="invalid_role")
+            ChatMessageCreate.model_validate({
+                "content": "Hello",
+                "role": "invalid_role",
+            })
 
     def test_chat_message_schema_requires_thread_uid(self) -> None:
         """ChatMessageSchema should require thread_uid."""
         with pytest.raises(ValidationError):
-            ChatMessageSchema(
-                role="user",
-                content="Hello",
-                uid="550e8400-e29b-41d4-a716-446655440000",
-                user_id="user_123",
-                tenant_id="tenant_123",
-            )
+            ChatMessageSchema.model_validate({
+                "role": "user",
+                "content": "Hello",
+                "uid": "550e8400-e29b-41d4-a716-446655440000",
+                "user_id": "user_123",
+            })
 
     def test_chat_thread_schema_requires_session_uid(self) -> None:
         """ChatThreadSchema should require session_uid."""
         with pytest.raises(ValidationError):
-            ChatThreadSchema(
-                uid="550e8400-e29b-41d4-a716-446655440000",
-                user_id="user_123",
-                tenant_id="tenant_123",
-            )
+            ChatThreadSchema.model_validate({
+                "uid": "550e8400-e29b-41d4-a716-446655440000",
+                "user_id": "user_123",
+            })

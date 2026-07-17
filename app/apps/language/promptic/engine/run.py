@@ -13,12 +13,25 @@ import aiofiles
 import dotenv
 import httpx
 import yaml
-from engine import PromptEngine, load_data
 
 from server.config import Settings
 
+from .engine import PromptEngine, load_data
+
 dotenv.load_dotenv()
 logger = logging.getLogger(__name__)
+
+
+class OpenRouterRequestError(RuntimeError):
+    """Raised when an OpenRouter request fails."""
+
+
+class InvalidModelJsonError(ValueError):
+    """Raised when a model response does not contain valid JSON."""
+
+
+class InvalidPromptResultError(ValueError):
+    """Raised when a prompt result is not a JSON object."""
 
 
 async def call_openrouter(
@@ -65,18 +78,21 @@ async def call_openrouter(
             resp.raise_for_status()
             data = resp.json()
     except httpx.HTTPStatusError as e:
-        raise RuntimeError(
+        error = OpenRouterRequestError(
             f"OpenRouter HTTP {e.response.status_code}: {e.response.text}"
-        ) from e
+        )
+        raise error from e
     except httpx.RequestError as e:
-        raise RuntimeError(f"OpenRouter request failed: {e}") from e
+        error = OpenRouterRequestError(f"OpenRouter request failed: {e}")
+        raise error from e
 
     choices = data.get("choices")
     if not choices:
-        raise RuntimeError(
+        error = OpenRouterRequestError(
             "پاسخی از مدل نیامد؛ پاسخ خام: "
             + json.dumps(data, ensure_ascii=False)[:500]
         )
+        raise error
     content = choices[0].get("message", {}).get("content") or ""
     return content.strip()
 
@@ -97,7 +113,15 @@ def extract_json_from_content(content: str) -> dict | list:
             return json.loads(content)
         if content.startswith("{"):
             return json.loads(content)
-        raise ValueError("خروجی مدل JSON معتبر نبود.") from None
+        error = InvalidModelJsonError("خروجی مدل JSON معتبر نبود.")
+        raise error from None
+
+
+def _require_json_object(result: dict | list) -> dict:
+    """Return a JSON object result or reject other valid JSON values."""
+    if isinstance(result, dict):
+        return result
+    raise InvalidPromptResultError
 
 
 async def _main() -> None:
@@ -123,13 +147,14 @@ async def _main() -> None:
         if not isinstance(input_data, dict):
             logger.error("Input file must yield a dict (YAML/JSON)")
             sys.exit(1)
+            return
 
         system_p, user_p, response_format = engine.generate(args.prompt, input_data)
 
         content = await call_openrouter(
             system_p, user_p, response_format=response_format
         )
-        result = extract_json_from_content(content)
+        result = _require_json_object(extract_json_from_content(content))
 
         if args.output:
             async with aiofiles.open(args.output, "w", encoding="utf-8") as f:

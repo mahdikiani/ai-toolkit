@@ -10,6 +10,7 @@ from apps.language.prompts.routes import router as prompts_router
 from apps.language.translate.routes import router as translate_router
 from apps.ocr.routes import router as ocr_router
 from apps.transcribe.routes import router as transcribe_router
+from apps.webpage.routes import router as webpage_router
 from apps.youtube.routes import router as youtube_router
 
 from . import config
@@ -25,6 +26,7 @@ for router in [
     ocr_router,
     transcribe_router,
     translate_router,
+    webpage_router,
     youtube_router,
 ]:
     server_router.include_router(router)

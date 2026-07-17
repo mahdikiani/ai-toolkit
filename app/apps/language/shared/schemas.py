@@ -12,6 +12,10 @@ from typing import Self
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+class MissingContentFieldError(ValueError):
+    """Raised when content lacks the field required by its type."""
+
+
 class Role(StrEnum):
     """Message role in conversation."""
 
@@ -59,10 +63,14 @@ class ContentPart(BaseModel):
         """
         if self.type == ContentType.TEXT:
             if self.text is None:
-                raise ValueError("text is required when type=text")
+                error = MissingContentFieldError("text is required when type=text")
+                raise error
         else:  # IMAGE or DOCUMENT
             if self.file_url is None:
-                raise ValueError("file_url is required when type=image or document")
+                error = MissingContentFieldError(
+                    "file_url is required when type=image or document"
+                )
+                raise error
         return self
 
 

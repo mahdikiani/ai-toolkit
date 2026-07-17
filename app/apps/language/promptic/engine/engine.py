@@ -8,6 +8,18 @@ import yaml
 from jinja2 import Template
 
 
+class PromptDataError(ValueError):
+    """Raised when prompt data is invalid or unsupported."""
+
+
+class PromptDataTypeError(TypeError):
+    """Raised when prompt data has an unexpected type."""
+
+
+class PromptDataNotFoundError(FileNotFoundError):
+    """Raised when a prompt data file does not exist."""
+
+
 def _yaml_schema_to_json_schema(schema: dict) -> dict:
     """Convert simplified YAML output_schema to OpenRouter-compatible JSON Schema."""
 
@@ -16,7 +28,7 @@ def _yaml_schema_to_json_schema(schema: dict) -> dict:
             props = {}
             required = []
             for k, v in val.items():
-                if k.startswith("#"):
+                if isinstance(k, str) and k.startswith("#"):
                     continue
                 props[k] = _convert_value(v)
                 required.append(k)
@@ -61,7 +73,8 @@ def load_data(path: Path | str) -> dict | str:
         path = Path(path)
 
     if not path.exists():
-        raise FileNotFoundError(f"{path} not found")
+        error = PromptDataNotFoundError(f"{path} not found")
+        raise error
 
     with open(path, encoding="utf-8") as f:
         raw = f.read()
@@ -77,8 +90,10 @@ def load_data(path: Path | str) -> dict | str:
     if path.suffix.lower() in (".md",):
         return raw.strip()
     if path.suffix.lower() in (".html",):
-        raise ValueError("HTML input is not supported")
-    raise ValueError(f"Unsupported file type: {path.suffix}")
+        error = PromptDataError("HTML input is not supported")
+        raise error
+    error = PromptDataError(f"Unsupported file type: {path.suffix}")
+    raise error
 
 
 class PromptEngine:
@@ -103,7 +118,10 @@ class PromptEngine:
         data = load_data(path)
         if isinstance(data, dict):
             return data
-        raise ValueError(f"Expected YAML dict from {file_path}, got {type(data)}")
+        error = PromptDataError(
+            f"Expected YAML dict from {file_path}, got {type(data)}"
+        )
+        raise error
 
     def resolve_component(
         self, comp_name: str, comp_data: dict[str, str], context: dict
@@ -123,13 +141,15 @@ class PromptEngine:
             try:
                 external_data = self._load_yaml(str(full_path))
                 if not isinstance(external_data, dict):
-                    raise TypeError(f"File '{file_path}' must yield a dict")
+                    error = PromptDataTypeError(f"File '{file_path}' must yield a dict")
+                    raise error
                 external_components = external_data.get("components", {})
                 target_comp = external_components.get(comp_key)
                 if not target_comp:
-                    raise ValueError(
+                    error = PromptDataError(
                         f"Component '{comp_key}' not found in file '{file_path}'."
                     )
+                    raise error
                 return self.resolve_component(comp_key, target_comp, context)
             finally:
                 self._prompt_dir = prev_dir
@@ -157,6 +177,7 @@ class PromptEngine:
             "language",
             "question",
             "context",
+            "conversation",
             "broken_json",
             "target_schema",
             "user_correction",
@@ -177,7 +198,10 @@ class PromptEngine:
         for comp_name in comp_names or []:
             comp_data = components_cfg.get(comp_name)
             if not comp_data:
-                raise ValueError(f"Component '{comp_name}' not found in components")
+                error = PromptDataError(
+                    f"Component '{comp_name}' not found in components"
+                )
+                raise error
             resolved = self.resolve_component(comp_name, comp_data, render_ctx)
             resolved_schema = resolved.get("output_schema", {})
             if isinstance(resolved_schema, dict) and resolved_schema:
@@ -222,7 +246,8 @@ class PromptEngine:
         if isinstance(main_config, str):
             return "", Template(main_config).render(**render_ctx), None
         if not isinstance(main_config, dict):
-            raise TypeError("Prompt file must yield a dict or string")
+            error = PromptDataTypeError("Prompt file must yield a dict or string")
+            raise error
 
         task_cfg = main_config.get("task", {})
         system_cfg = task_cfg.get("system") or main_config.get("system", {})
@@ -231,25 +256,11 @@ class PromptEngine:
         component_key_parts: dict[str, list[str]] = {}
         merged_output_schema: dict = {}
 
-        if isinstance(system_cfg, str):
-            part = self._render_system_key("system", system_cfg, render_ctx)
-            if part:
-                system_parts.append(part)
-        else:
-            for key, value in system_cfg.items():
-                if key == "components":
-                    (
-                        comp_xml_parts,
-                        component_key_parts,
-                        component_schemas,
-                    ) = self._process_components(value, components_cfg, render_ctx)
-                    system_parts.extend(comp_xml_parts)
-                    if component_schemas:
-                        merged_output_schema.update(component_schemas)
-                    continue
-                part = self._render_system_key(key, value, render_ctx)
-                if part:
-                    system_parts.append(part)
+        (
+            system_parts,
+            component_key_parts,
+            merged_output_schema,
+        ) = self._render_system(system_cfg, components_cfg, render_ctx)
 
         for comp_key, parts in component_key_parts.items():
             if parts:
@@ -279,3 +290,27 @@ class PromptEngine:
             }
 
         return system_xml, user_xml, response_format
+
+    def _render_system(
+        self, system_cfg: str | dict, components_cfg: dict, render_ctx: dict
+    ) -> tuple[list[str], dict[str, list[str]], dict]:
+        """Render system configuration and its referenced components."""
+        if isinstance(system_cfg, str):
+            part = self._render_system_key("system", system_cfg, render_ctx)
+            return ([part] if part else []), {}, {}
+
+        system_parts: list[str] = []
+        component_key_parts: dict[str, list[str]] = {}
+        merged_output_schema: dict = {}
+        for key, value in system_cfg.items():
+            if key == "components":
+                parts, component_key_parts, schemas = self._process_components(
+                    value, components_cfg, render_ctx
+                )
+                system_parts.extend(parts)
+                merged_output_schema.update(schemas)
+                continue
+            part = self._render_system_key(key, value, render_ctx)
+            if part:
+                system_parts.append(part)
+        return system_parts, component_key_parts, merged_output_schema

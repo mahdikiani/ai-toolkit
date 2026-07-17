@@ -8,11 +8,11 @@ from pymongo import ASCENDING, IndexModel
 from .schemas import ChatMessageSchema, ChatSessionSchema, ChatThreadSchema
 
 
-class ChatSession(UserOwnedEntity, ChatSessionSchema):  # type: ignore[misc]
+class ChatSession(UserOwnedEntity, ChatSessionSchema):
     """Conversation container; threads isolate model/branches."""
 
 
-class ChatThread(UserOwnedEntity, ChatThreadSchema):  # type: ignore[misc]
+class ChatThread(UserOwnedEntity, ChatThreadSchema):
     """One branch inside a session."""
 
     class Settings:
@@ -24,7 +24,7 @@ class ChatThread(UserOwnedEntity, ChatThreadSchema):  # type: ignore[misc]
         ]
 
 
-class ChatMessage(UserOwnedEntity, ChatMessageSchema):  # type: ignore[misc]
+class ChatMessage(UserOwnedEntity, ChatMessageSchema):
     """Single message bound to a thread."""
 
     class Settings:

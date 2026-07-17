@@ -6,6 +6,10 @@ from typing import Self
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+class MissingContentError(ValueError):
+    """Raised when a content part has neither text nor a file URL."""
+
+
 class Role(StrEnum):
     """Enum for message roles."""
 
@@ -27,14 +31,6 @@ class ModelConfig(BaseModel):
 
     temperature: float = 0.2
     top_p: float = 1
-    # max_tokens: int | None = None
-    # frequency_penalty: float = 0.0
-    # presence_penalty: float = 0.0
-    # stop_sequences: list[str] = Field(default_factory=list)
-    # stop_token_ids: list[int] = Field(default_factory=list)
-    # stop_words: list[str] = Field(default_factory=list)
-    # stop_word_ids: list[int] = Field(default_factory=list)
-    # meta_data: dict | None = None
 
 
 class ContentPart(BaseModel):
@@ -50,7 +46,8 @@ class ContentPart(BaseModel):
     def validate_content(self) -> Self:
         """Validate that either text or file_url is provided."""
         if self.text is None and self.file_url is None:
-            raise ValueError("Either text or file_url must be provided")
+            error = MissingContentError("Either text or file_url must be provided")
+            raise error
         return self
 
 

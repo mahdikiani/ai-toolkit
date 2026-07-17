@@ -36,14 +36,13 @@ class Settings(config.Settings):
     media_api_key: str | None = os.getenv("MEDIA_API_KEY")
     media_base_url: str | None = os.getenv("MEDIA_BASE_URL")
 
-    youtube_transcript_api_key: str | None = os.getenv(
-        "YOUTUBE_TRANSCRIPT_API_KEY"
-    )
+    youtube_transcript_api_key: str | None = os.getenv("YOUTUBE_TRANSCRIPT_API_KEY")
     openrouter_api_key: str | None = os.getenv("OPENROUTER_API_KEY")
     openrouter_base_url: str = os.getenv(
         "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
     )
     default_model: str = os.getenv("DEFAULT_MODEL", "openai/gpt-4o-mini")
+    title_model: str = os.getenv("OPENROUTER_TITLE_MODEL", "google/gemma-2-9b-it:free")
     soniox_api_key: str | None = os.getenv("SONIOX_API_KEY")
 
     ocr_engine: str = os.getenv("OCR_ENGINE", "llm")
@@ -54,7 +53,7 @@ class Settings(config.Settings):
     pricing: ClassVar[dict] = json.loads(os.getenv("AI_TOOLKIT_PRICING", "{}"))
 
     transcribe_enable_chunking: bool = (
-        os.getenv("TRANSCRIBE_ENABLE_CHUNKING", "1") == "1"
+        os.getenv("TRANSCRIBE_ENABLE_CHUNKING", "0") == "1"
     )
     transcribe_chunk_min_minutes: int = int(
         os.getenv("TRANSCRIBE_CHUNK_MIN_MINUTES", 5)
@@ -90,7 +89,10 @@ class Settings(config.Settings):
         log_config = {
             "formatters": {
                 "standard": {
-                    "format": "[{levelname} {name} : {filename}:{lineno} : {asctime} -> {funcName:10}] {message}",  # noqa: E501
+                    "format": (
+                        "[{levelname} {name} : {filename}:{lineno} : {asctime} "
+                        "-> {funcName:10}] {message}"
+                    ),
                     "style": "{",
                 }
             },

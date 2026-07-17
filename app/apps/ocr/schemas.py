@@ -6,11 +6,13 @@ import json
 from enum import StrEnum
 from io import BytesIO
 
-import httpx
-from fastapi import Form, HTTPException
+from fastapi import Form
+from fastapi_mongo_base.core.exceptions import BaseHTTPException
 from fastapi_mongo_base.schemas import UserOwnedEntitySchema
-from fastapi_mongo_base.tasks import TaskMixin
-from pydantic import BaseModel, Field
+from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
+from pydantic import Field
+
+from utils.downloaders import download_bytes
 
 
 class OcrEngineType(StrEnum):
@@ -21,24 +23,15 @@ class OcrEngineType(StrEnum):
     paddleocr_vl_1_5 = "paddleocr_vl_1_5"
 
 
-class OcrTaskSchemaCreate(BaseModel):
+class OcrTaskSchemaCreate(TaskCreateFieldsMixin):
     """Schema for creating a new OCR task."""
 
     file_url: str = Field(
         min_length=1,
         description="The URL of the file or base64 encoded data to be OCRed",
     )
-    user_id: str | None = Field(
-        None, description="The ID of the user who is requesting the OCR (only admin)"
-    )
-    webhook_url: str | None = Field(
-        None, description="The URL to send the OCR result to"
-    )
     webhook_custom_headers: dict | None = Field(
         None, description="Custom headers to send with the OCR result"
-    )
-    meta_data: dict | None = Field(
-        None, description="Additional metadata to be included in the OCR result"
     )
     ocr_engine: OcrEngineType | None = Field(
         None,
@@ -69,11 +62,8 @@ class OcrTaskSchemaCreate(BaseModel):
             self._file_content.seek(0)
             return self._file_content
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(self.file_url)
-            self._file_content.write(response.content)
-            self._file_content.seek(0)
-            return self._file_content
+        self._file_content = await download_bytes(self.file_url)
+        return self._file_content
 
     async def file_content_base64(self) -> str:
         """Return file content encoded as base64 string."""
@@ -81,13 +71,10 @@ class OcrTaskSchemaCreate(BaseModel):
         return base64.b64encode(content.getvalue()).decode("utf-8")
 
 
-class OcrTaskUploadFormSchema(BaseModel):
+class OcrTaskUploadFormSchema(TaskCreateFieldsMixin):
     """Schema for multipart form upload of OCR tasks."""
 
-    user_id: str | None = None
-    webhook_url: str | None = None
     webhook_custom_headers: dict | None = None
-    meta_data: dict | None = None
     ocr_engine: OcrEngineType | None = None
 
     @classmethod
@@ -106,9 +93,12 @@ class OcrTaskUploadFormSchema(BaseModel):
             )
             parsed_meta_data = json.loads(meta_data) if meta_data else None
         except json.JSONDecodeError as exc:
-            raise HTTPException(
+            msg = "webhook_custom_headers and meta_data must be valid JSON."
+            raise BaseHTTPException(
                 status_code=422,
-                detail="webhook_custom_headers and meta_data must be valid JSON.",
+                error_code="invalid_json",
+                detail=msg,
+                message={"en": msg},
             ) from exc
 
         return cls(
@@ -120,15 +110,12 @@ class OcrTaskUploadFormSchema(BaseModel):
         )
 
 
-class OcrTaskBase64Schema(BaseModel):
+class OcrTaskBase64Schema(TaskCreateFieldsMixin):
     """Base64 upload payload for OCR tasks."""
 
     content_base64: str = Field(..., min_length=1)
     mime_type: str = "application/octet-stream"
-    user_id: str | None = None
-    webhook_url: str | None = None
     webhook_custom_headers: dict | None = None
-    meta_data: dict | None = None
     ocr_engine: OcrEngineType | None = None
 
     def to_create_schema(self) -> OcrTaskSchemaCreate:
@@ -149,7 +136,7 @@ class OcrTaskBase64Schema(BaseModel):
         )
 
 
-class OcrTaskSchema(UserOwnedEntitySchema, TaskMixin, OcrTaskSchemaCreate):  # type: ignore[misc]
+class OcrTaskSchema(UserOwnedEntitySchema, TaskMixin, OcrTaskSchemaCreate):
     """Complete OCR task schema including result and usage fields."""
 
     result: str | None = None

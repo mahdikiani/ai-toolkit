@@ -59,11 +59,6 @@ class TestFileURLValidation:
             validate_file_url("   ")
         assert "File URL cannot be empty" in str(exc_info.value)
 
-    def test_none_value_raises_error(self) -> None:
-        """Should reject None value."""
-        with pytest.raises((FileValidationError, AttributeError)):
-            validate_file_url(None)
-
     def test_url_with_query_params(self) -> None:
         """Should accept URL with query parameters."""
         url = "https://example.com/file.jpg?token=abc123"

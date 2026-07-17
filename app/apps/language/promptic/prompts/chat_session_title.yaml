@@ -1,0 +1,39 @@
+name: chat_session_title
+model: google/gemma-2-9b-it:free
+temperature: 0.3
+max_tokens: 80
+
+metadata:
+  id: chat.session_title.v1
+  name: "Chat Session Title"
+  version: "1"
+  description: |
+    Decide whether a chat excerpt is specific enough for a session title,
+    and propose a short title when it is.
+
+components:
+  session_title:
+    task: |
+      Read the conversation and decide if there is enough substantive topic
+      for a meaningful session title (max 6 words, no quotes).
+      Generic openers alone — e.g. "hi", "hello", "سلام", "help me" — are
+      NOT enough: set has_title to false and leave title empty.
+      When the topic is clear, set has_title to true and propose a concise
+      title in {{ language | default('the same language as the conversation') }}.
+    output_schema:
+      session_title:
+        has_title: boolean
+        title: string
+
+task:
+  system:
+    personas: |
+      You label chat sessions for a conversation archive.
+    components:
+      - session_title
+    constraints: |
+      Return ONLY valid JSON matching the schema. No markdown, no explanation.
+  user: |
+    <conversation>
+    {{ conversation }}
+    </conversation>

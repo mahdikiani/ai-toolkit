@@ -1,29 +1,30 @@
 """YouTube transcription API routes for transcript task management."""
 
 import json
+from typing import cast
 
 from fastapi import BackgroundTasks, Query, Request
 from fastapi.responses import PlainTextResponse, Response
-from fastapi_mongo_base.routes import AbstractTaskRouter, PaginatedResponse
-from fastapi_mongo_base.utils import usso_routes
-from usso.integrations.fastapi import USSOAuthentication
+from fastapi_mongo_base.routes import PaginatedResponse
 
 from server.config import Settings
+from utils.auth import authorize_create_on_behalf
+from utils.task_routes import AbstractTaskUSSORouter
 
-from .models import YoutubeTask
-from .schemas import YoutubeTaskSchema, YoutubeTaskSchemaCreate
+from .models import YoutubeTranscriptTask
+from .schemas import YoutubeTranscriptTaskSchema, YoutubeTranscriptTaskSchemaCreate
 
 
-class YoutubeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
+class YoutubeRouter(AbstractTaskUSSORouter):
     """Router for YouTube transcription task management endpoints."""
 
-    model = YoutubeTask
-    schema = YoutubeTaskSchema
+    model = YoutubeTranscriptTask
+    schema = YoutubeTranscriptTaskSchema
 
     def __init__(self) -> None:
         """Initialize the YouTube router with authentication and configuration."""
         super().__init__(
-            user_dependency=USSOAuthentication(),
+            user_dependency=None,
             draftable=False,
             prefix="/youtube",
             tags=["YouTube"],
@@ -44,38 +45,34 @@ class YoutubeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         offset: int = Query(0, ge=0),
         limit: int = Query(10, ge=1, le=Settings.page_max_limit),
         user_id: str | None = None,
-    ) -> PaginatedResponse[YoutubeTaskSchema]:
+    ) -> PaginatedResponse[YoutubeTranscriptTaskSchema]:
         """List YouTube transcription tasks with pagination."""
-        return await self._list_items(request, offset, limit, user_id=user_id)
+        return cast(
+            PaginatedResponse[YoutubeTranscriptTaskSchema],
+            await self._list_items(request, offset, limit, user_id=user_id),
+        )
 
     async def create_item(
         self,
         request: Request,
-        data: YoutubeTaskSchemaCreate,
+        data: YoutubeTranscriptTaskSchemaCreate,
         background_tasks: BackgroundTasks,
-        blocking: bool = False,
-    ) -> YoutubeTask:
+    ) -> YoutubeTranscriptTask:
         """Create a new YouTube transcription task."""
         user = await self.get_user(request)
-        data.user_id = data.user_id or user.user_id
-        if data.user_id != user.user_id:
-            await self.authorize(
-                action="create", user=user, filter_data=data.model_dump()
-            )
+        await authorize_create_on_behalf(self, request, user, data)
 
         item = await self.model.create_item({
             **data.model_dump(exclude_none=True),
             "tenant_id": user.tenant_id,
+            "user_id": data.user_id or user.uid,
         })
-        if blocking:
-            await item.start_processing()
-        else:
-            background_tasks.add_task(item.start_processing)
+        background_tasks.add_task(item.start_processing)
         return item
 
-    async def get_result(self, request: Request, uid: str):  # noqa: ANN201
+    async def get_result(self, request: Request, uid: str) -> Response:
         """Retrieve the result of a completed YouTube transcription task."""
-        task: YoutubeTask = await self.retrieve_item(request, uid)
+        task: YoutubeTranscriptTask = await self.retrieve_item(request, uid)
 
         if task.task_status != "completed":
             return PlainTextResponse(

@@ -91,7 +91,7 @@ class TestTaskStatusTransitions:
                 )
 
     def test_init_cannot_transition_to_completed(self) -> None:
-        """Init -> completed should be an invalid transition (must go through processing)."""
+        """Reject init-to-completed transitions that bypass processing."""
         assert not is_valid_transition(TaskStatusEnum.init, TaskStatusEnum.completed)
 
     @given(st.sampled_from(ALL_STATUSES))

@@ -36,7 +36,6 @@ class Language(StrEnum):
     Japanese = "Japanese"
     Korean = "Korean"
     Mandarin = "Mandarin"
-    # Chinese = "Chinese"
     Vietnamese = "Vietnamese"
     Indonesian = "Indonesian"
 
@@ -156,11 +155,6 @@ class Language(StrEnum):
                 "en": "Korean",
                 "abbreviation": "ko",
             },
-            # Language.Chinese: {
-            #     "fa": "چینی",
-            #     "en": "Chinese",
-            #     "abbreviation": "zh",
-            # },
             Language.Mandarin: {
                 "fa": "چینی ماندارین",
                 "en": "Mandarin",
@@ -358,7 +352,7 @@ class JobStatus(StrEnum):
         Returns:
             List of finished status values (done, rejected).
         """
-        return [cls.done, cls.rejected]  # type: ignore[list-item]
+        return [cls.done, cls.rejected]
 
     def is_finished(self) -> bool:
         """
@@ -442,16 +436,10 @@ class Speechmatics(metaclass=Singleton):
             },
             "fetch_data": {"url": video_url},
         }
-        # conf = {
-        #     "type": "transcription",
-        #     "transcription_config": {"language": "auto"},
-        #     "fetch_data": {"url": video_url},
-        # }
         if webhook_url:
             conf["notification_config"] = [
                 {
                     "url": webhook_url,
-                    # "contents": ["transcript", "data"],
                     "auth_headers": [f"Authorization: {secret_token}"],
                 }
             ]

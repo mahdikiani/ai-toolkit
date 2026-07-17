@@ -1,16 +1,36 @@
 """Utility functions for common test assertions."""
 
+from typing import Protocol
+
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
 
-def assert_task_status(task, expected_status: TaskStatusEnum) -> None:
+class TaskLike(Protocol):
+    """Represent the task attributes checked by these assertions."""
+
+    task_status: TaskStatusEnum
+    result: object | None
+    error: str | None
+
+
+class ApiResponseLike(Protocol):
+    """Represent the response attributes checked by these assertions."""
+
+    status_code: int
+    text: str
+
+    def json(self) -> dict[str, object]:
+        """Return the response body as JSON."""
+
+
+def assert_task_status(task: TaskLike, expected_status: TaskStatusEnum) -> None:
     """Assert that a task has the expected status."""
     assert task.task_status == expected_status, (
         f"Expected task status {expected_status}, got {task.task_status}"
     )
 
 
-def assert_task_completed(task) -> None:
+def assert_task_completed(task: TaskLike) -> None:
     """Assert that a task completed successfully."""
     assert task.task_status == TaskStatusEnum.completed, (
         f"Expected task to be completed, got {task.task_status}"
@@ -19,7 +39,7 @@ def assert_task_completed(task) -> None:
     assert task.error is None, f"Expected no error, got: {task.error}"
 
 
-def assert_task_failed(task) -> None:
+def assert_task_failed(task: TaskLike) -> None:
     """Assert that a task failed with an error."""
     assert task.task_status == TaskStatusEnum.error, (
         f"Expected task to be in error state, got {task.task_status}"
@@ -66,7 +86,7 @@ def assert_valid_transition(
     )
 
 
-def assert_api_error_response(response, expected_status: int) -> None:
+def assert_api_error_response(response: ApiResponseLike, expected_status: int) -> None:
     """Assert that an API response is an error with the expected status code."""
     assert response.status_code == expected_status, (
         f"Expected status {expected_status}, got {response.status_code}. "

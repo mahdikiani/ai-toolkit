@@ -9,8 +9,8 @@ from fastapi import HTTPException
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
 from server.config import Settings
-from utils import finance
-from utils import openrouter as openrouter_client
+from utils.billing import finance
+from utils.integrations import openrouter as openrouter_client
 
 from .engine import PromptEngine
 
@@ -151,9 +151,10 @@ async def process_promptic(
     prompt_path = prompts_dir / f"{task.prompt_name}.yaml"
 
     if not prompt_path.exists():
-        task.error = f"Prompt '{task.prompt_name}' not found"
-        task.task_status = TaskStatusEnum.error
-        await task.save()
+        await task.update_and_emit(
+            error=f"Prompt '{task.prompt_name}' not found",
+            task_status=TaskStatusEnum.error,
+        )
         return task
 
     try:
@@ -176,10 +177,11 @@ async def process_promptic(
             provider_meta = {}
 
         usage = (provider_meta.get("usage") if provider_meta else None) or {}
+        raw_cost = provider_meta.get("raw_cost")
         amount = finance.estimate_text_cost(
             model=str(provider_meta.get("model") or ""),
             usage=usage if isinstance(usage, dict) else None,
-            raw_cost=provider_meta.get("raw_cost"),
+            raw_cost=_text_cost_value(raw_cost),
         )
         metered = await finance.meter_cost(
             task.user_id,
@@ -191,20 +193,29 @@ async def process_promptic(
             },
         )
 
-        task.result = result
-        task.provider_meta = provider_meta
-        task.usage_amount = float(metered.amount) if metered else amount
-        task.usage_id = metered.uid if metered else None
-        task.task_status = TaskStatusEnum.completed
-        await task.save()
+        await task.update_and_emit(
+            result=result,
+            provider_meta=provider_meta,
+            usage_amount=float(metered.amount) if metered else amount,
+            usage_id=metered.uid if metered else None,
+            task_status=TaskStatusEnum.completed,
+        )
 
     except Exception as e:
         logger.exception("Error executing prompt")
-        task.error = str(e)
-        task.task_status = TaskStatusEnum.error
-        await task.save()
+        await task.update_and_emit(
+            error=str(e),
+            task_status=TaskStatusEnum.error,
+        )
 
     return task
 
 
 process_execution_task = process_promptic
+
+
+def _text_cost_value(value: object) -> int | float | str | None:
+    """Return a provider cost value accepted by the finance service."""
+    if isinstance(value, (int, float, str)):
+        return value
+    return None

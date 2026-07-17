@@ -41,7 +41,7 @@ class PrompticSchema(UserOwnedEntitySchema, TaskMixin, PrompticCreate):
 
     # Override idempotency_key to make it required in stored tasks
     # (it's auto-generated if not provided in the request)
-    idempotency_key: str = Field(  # type: ignore[assignment]
+    idempotency_key: str = Field(
         ...,
         description="SHA256 hash for deduplication (auto-generated if not provided)",
     )

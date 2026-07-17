@@ -5,7 +5,9 @@ import logging
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
 from server.config import Settings
-from utils import finance, mime, texttools
+from utils import texttools
+from utils.billing import finance
+from utils.files import mime
 
 from .archive_services import process_compressed_archive
 from .file_processors import (
@@ -95,9 +97,9 @@ async def process_ocr(task: OcrTask) -> OcrTask:
             },
         )
 
-    except Exception:
+    except Exception as exc:
         logging.exception("Error processing task %s", task.uid)
-        return await save_error(task, "error")
+        return await save_error(task, f"OCR processing failed: {exc}")
 
 
 async def save_error(task: OcrTask, message: str) -> OcrTask:

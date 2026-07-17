@@ -1,1 +1,1 @@
-"""Utility modules for the AI toolkit service."""
+"""Shared utilities grouped by domain (auth, billing, files, integrations, text)."""

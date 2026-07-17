@@ -26,7 +26,7 @@ class TestChatSessionRoutes:
         assert response.status_code in (401, 403)
 
     async def test_get_session_not_found(self, client: httpx.AsyncClient) -> None:
-        """GET /chat/sessions/{uid} for non-existent session should return 401 or 404."""
+        """Return 401 or 404 for an unknown chat session."""
         response = await client.get("/chat/sessions/nonexistent_uid_12345")
         assert response.status_code in (401, 403, 404)
 

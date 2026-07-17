@@ -40,7 +40,7 @@ def test_audio_chunk_model_has_required_fields() -> None:
         chunk_id=0,
         start_ms=1000,
         end_ms=3000,
-        file_path=Path("/tmp/chunk_0000.mp3"),
+        file_path=Path("chunk_0000.mp3"),
     )
 
     # Property: All required fields must be accessible
@@ -54,7 +54,6 @@ def test_audio_chunk_model_has_required_fields() -> None:
     assert chunk.duration_ms == 2000, (
         f"Expected duration 2000ms, got {chunk.duration_ms}ms"
     )
-    print("✓ AudioChunk model API preserved")
 
 
 def test_chunk_plan_model_has_required_fields() -> None:
@@ -91,7 +90,6 @@ def test_chunk_plan_model_has_required_fields() -> None:
 
         # Property: cleanup method must be callable
         assert callable(plan.cleanup), "cleanup must be a callable method"
-        print("✓ ChunkPlan model API preserved")
 
 
 def test_chunk_transcription_result_model_has_required_fields() -> None:
@@ -107,7 +105,7 @@ def test_chunk_transcription_result_model_has_required_fields() -> None:
         chunk_id=0,
         start_ms=0,
         end_ms=1000,
-        file_path=Path("/tmp/chunk_0000.mp3"),
+        file_path=Path("chunk_0000.mp3"),
     )
 
     result = chunker.ChunkTranscriptionResult(
@@ -124,7 +122,6 @@ def test_chunk_transcription_result_model_has_required_fields() -> None:
     assert hasattr(result, "text"), "Result must have text"
     assert hasattr(result, "audio_duration_ms"), "Result must have audio_duration_ms"
     assert hasattr(result, "transcription_cost"), "Result must have transcription_cost"
-    print("✓ ChunkTranscriptionResult model API preserved")
 
 
 def test_calculate_cut_points_respects_min_max_constraints() -> None:
@@ -180,8 +177,6 @@ def test_calculate_cut_points_respects_min_max_constraints() -> None:
             )
         cursor = cut_point
 
-    print("✓ Chunk boundary calculation preserves min/max constraints")
-
 
 def test_calculate_cut_points_prefers_silence_boundaries() -> None:
     """
@@ -214,8 +209,6 @@ def test_calculate_cut_points_prefers_silence_boundaries() -> None:
         assert abs(first_cut - silence_midpoint) <= 2000, (
             f"Cut point {first_cut} should be near silence midpoint {silence_midpoint}"
         )
-
-    print("✓ Chunk boundaries prefer silence ranges")
 
 
 # Documentation of expected behavior for preservation
@@ -252,7 +245,8 @@ Expected Behaviors (from Requirements 3.1-3.8):
 5. API Interface (3.5):
    - AudioChunk: chunk_id, start_ms, end_ms, file_path, duration_ms
    - ChunkPlan: duration_ms, chunks, workspace, cleanup()
-   - ChunkTranscriptionResult: chunk, job_id, text, audio_duration_ms, transcription_cost
+   - ChunkTranscriptionResult: chunk, job_id, text, audio_duration_ms,
+     transcription_cost
 
 6. Integration (3.6):
    - Short audio (< max_chunk_ms) produces single chunk
@@ -276,9 +270,6 @@ Testing Approach:
 
 
 if __name__ == "__main__":
-    print("Running preservation property tests...")
-    print("=" * 70)
-
     try:
         test_audio_chunk_model_has_required_fields()
         test_chunk_plan_model_has_required_fields()
@@ -286,19 +277,9 @@ if __name__ == "__main__":
         test_calculate_cut_points_respects_min_max_constraints()
         test_calculate_cut_points_prefers_silence_boundaries()
 
-        print("=" * 70)
-        print("✓ All preservation property tests passed!")
-        print("\nBaseline behavior documented:")
-        print("- AudioChunk, ChunkPlan, ChunkTranscriptionResult APIs preserved")
-        print("- Chunk boundary calculation logic preserved")
-        print("- Min/max duration constraints respected")
-        print("- Silence-based cut points preferred")
-
-    except AssertionError as e:
-        print(f"\n✗ Test failed: {e}")
+    except AssertionError:
         sys.exit(1)
-    except Exception as e:
-        print(f"\n✗ Unexpected error: {e}")
+    except Exception:
         import traceback
 
         traceback.print_exc()

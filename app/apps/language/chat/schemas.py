@@ -24,16 +24,21 @@ class ChatSessionUpdate(BaseModel):
     """Patch session metadata."""
 
     title: str | None = None
-    active_thread_uid: str | None = None
-
-
-class ChatSessionSchema(UserOwnedEntitySchema):
-    """Stored chat session."""
-
-    title: str | None = None
     active_thread_uid: str | None = Field(
         None,
         description="Hint for UI: last-focused thread uid",
+    )
+
+
+class ChatSessionSchema(UserOwnedEntitySchema, ChatSessionUpdate):
+    """Stored chat session."""
+
+    suggest_title: bool = Field(
+        True,
+        description=(
+            "When title is unset, use the chat_session_title prompt after each turn "
+            "until the model reports the topic is specific enough"
+        ),
     )
 
 
@@ -47,11 +52,10 @@ class ChatThreadCreate(BaseModel):
     )
 
 
-class ChatThreadSchema(UserOwnedEntitySchema):
+class ChatThreadSchema(UserOwnedEntitySchema, ChatThreadCreate):
     """Stored chat thread."""
 
     session_uid: str = Field(..., description="Owning session uid")
-    title: str | None = None
     chat_model: str | None = Field(
         None,
         description="Model used for completions in this thread",
@@ -71,7 +75,7 @@ class ChatMessageCreate(BaseModel):
         description="Optional reference to another message uid (UI threading)",
     )
     generate_reply: bool = Field(
-        False,
+        True,
         description=(
             "If true, call OpenRouter with full thread history "
             "and append assistant message"
@@ -99,5 +103,63 @@ class ChatMessageSchema(UserOwnedEntitySchema):
 class ChatCompletionResponse(BaseModel):
     """Non-streaming reply to POST .../messages when generate_reply is true."""
 
+    user_message: ChatMessageSchema
+    assistant_message: ChatMessageSchema | None = None
+
+
+class ChatQuickStartCreate(ChatMessageCreate):
+    """Send the first message; creates a session and thread automatically."""
+
+    title: str | None = Field(
+        None,
+        description="Optional session title; omit to auto-suggest from the message",
+    )
+    suggest_title: bool = Field(
+        True,
+        description=(
+            "When title is omitted, use the chat_session_title prompt to decide "
+            "if the conversation is specific enough for a title"
+        ),
+    )
+    chat_model: str | None = Field(
+        None,
+        description="OpenRouter model id for the new thread",
+    )
+    thread_title: str | None = Field(
+        None,
+        description="Title for the first thread (default: Thread 1)",
+    )
+
+
+class ChatQuickStartResponse(BaseModel):
+    """Reply to POST /chat/messages (quick-start)."""
+
+    session: ChatSessionSchema
+    thread: ChatThreadSchema
+    user_message: ChatMessageSchema
+    assistant_message: ChatMessageSchema | None = None
+
+
+class ChatQuickThreadCreate(ChatMessageCreate):
+    """Send the first message on a new thread inside an existing session."""
+
+    thread_title: str | None = Field(
+        None,
+        description="Optional thread title; omit to auto-suggest from the message",
+    )
+    suggest_thread_title: bool = Field(
+        True,
+        description="When thread_title is omitted, ask the model for a short title",
+    )
+    chat_model: str | None = Field(
+        None,
+        description="OpenRouter model id for the new thread",
+    )
+
+
+class ChatQuickThreadResponse(BaseModel):
+    """Reply to POST /chat/sessions/{session_uid}/messages (quick new thread)."""
+
+    thread: ChatThreadSchema
     user_message: ChatMessageSchema
     assistant_message: ChatMessageSchema | None = None

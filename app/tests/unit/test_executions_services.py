@@ -1,5 +1,7 @@
 """Unit tests for execution services."""
 
+import asyncio
+from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -38,6 +40,7 @@ class TestCheckSchemas:
             with pytest.raises(HTTPException) as exc_info:
                 check_schemas("nonexistent_prompt", data)
 
+            assert isinstance(exc_info.value, HTTPException)
             assert exc_info.value.status_code == 404
             assert "nonexistent_prompt" in exc_info.value.detail
 
@@ -73,21 +76,27 @@ class TestCallOpenrouter:
     async def test_raises_on_empty_choices(self) -> None:
         """call_openrouter should raise RuntimeError when choices is empty."""
         mock_response = {"choices": []}
-        with patch(
-            "apps.language.promptic.services.openrouter_client.complete_chat_json",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        ), pytest.raises(RuntimeError, match="No response from model"):
+        with (
+            patch(
+                "apps.language.promptic.services.openrouter_client.complete_chat_json",
+                new_callable=AsyncMock,
+                return_value=mock_response,
+            ),
+            pytest.raises(RuntimeError, match="No response from model"),
+        ):
             await call_openrouter(system="sys", user="usr")
 
     async def test_raises_on_missing_choices(self) -> None:
         """call_openrouter should raise RuntimeError when choices key is missing."""
         mock_response = {}
-        with patch(
-            "apps.language.promptic.services.openrouter_client.complete_chat_json",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        ), pytest.raises(RuntimeError, match="No response from model"):
+        with (
+            patch(
+                "apps.language.promptic.services.openrouter_client.complete_chat_json",
+                new_callable=AsyncMock,
+                return_value=mock_response,
+            ),
+            pytest.raises(RuntimeError, match="No response from model"),
+        ):
             await call_openrouter(system="sys", user="usr")
 
     async def test_uses_default_model(self) -> None:
@@ -144,7 +153,8 @@ class TestCallOpenrouterStream:
     async def test_yields_chunks_from_stream(self) -> None:
         """call_openrouter_stream should yield chunks from the streaming API."""
 
-        async def mock_stream(*args, **kwargs):
+        async def mock_stream(*args: object, **kwargs: object) -> AsyncIterator[str]:
+            await asyncio.sleep(0)
             for chunk in ["Hello", " ", "World"]:
                 yield chunk
 
@@ -152,14 +162,20 @@ class TestCallOpenrouterStream:
             "apps.language.promptic.services.openrouter_client.stream_chat_deltas",
             side_effect=mock_stream,
         ):
-            chunks = [chunk async for chunk in call_openrouter_stream(system="sys", user="usr")]
+            chunks = [
+                chunk
+                async for chunk in call_openrouter_stream(system="sys", user="usr")
+            ]
 
         assert chunks == ["Hello", " ", "World"]
 
     async def test_empty_stream_yields_nothing(self) -> None:
         """call_openrouter_stream should handle empty streams gracefully."""
 
-        async def mock_empty_stream(*args, **kwargs):
+        async def mock_empty_stream(
+            *args: object, **kwargs: object
+        ) -> AsyncIterator[str]:
+            await asyncio.sleep(0)
             return
             yield  # make it a generator
 
@@ -167,7 +183,10 @@ class TestCallOpenrouterStream:
             "apps.language.promptic.services.openrouter_client.stream_chat_deltas",
             side_effect=mock_empty_stream,
         ):
-            chunks = [chunk async for chunk in call_openrouter_stream(system="sys", user="usr")]
+            chunks = [
+                chunk
+                async for chunk in call_openrouter_stream(system="sys", user="usr")
+            ]
 
         assert chunks == []
 
@@ -215,6 +234,7 @@ class TestProcessExecutionTask:
             result = await process_execution_task(task)
 
         assert result.task_status == TaskStatusEnum.error
+        assert result.error is not None
         assert "missing_prompt" in result.error
 
     async def test_sets_error_on_openrouter_exception(self, tmp_path: Path) -> None:
@@ -242,6 +262,7 @@ class TestProcessExecutionTask:
             result = await process_execution_task(task)
 
         assert result.task_status == TaskStatusEnum.error
+        assert result.error is not None
         assert "API error" in result.error
 
 
@@ -262,6 +283,7 @@ class TestExecutionErrorHandling:
             with pytest.raises(HTTPException) as exc_info:
                 check_schemas("nonexistent_prompt", data)
 
+            assert isinstance(exc_info.value, HTTPException)
             assert exc_info.value.status_code == 404
             assert "nonexistent_prompt" in exc_info.value.detail
             assert "not found" in exc_info.value.detail.lower()
@@ -322,6 +344,7 @@ class TestExecutionErrorHandling:
             result = await process_execution_task(task)
 
         assert result.task_status == TaskStatusEnum.error
+        assert result.error is not None
         assert "OpenRouter API error" in result.error
         task.save.assert_called()
 
@@ -357,6 +380,7 @@ class TestExecutionErrorHandling:
             result = await process_execution_task(task)
 
         assert result.task_status == TaskStatusEnum.error
+        assert result.error is not None
         assert "Connection timeout" in result.error
         task.save.assert_called()
 
@@ -378,6 +402,7 @@ class TestExecutionErrorHandling:
             result = await process_execution_task(task)
 
         assert result.task_status == TaskStatusEnum.error
+        assert result.error is not None
         assert "nonexistent_prompt" in result.error
         assert "not found" in result.error.lower()
         task.save.assert_called()

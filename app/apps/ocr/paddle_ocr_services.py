@@ -21,29 +21,38 @@ def _get_pipeline() -> object:
     )
 
 
+def _string_keyed_values(payload: object) -> dict[str, object]:
+    """Keep dictionary entries whose keys are strings."""
+    if not isinstance(payload, dict):
+        return {}
+    return {key: value for key, value in payload.items() if isinstance(key, str)}
+
+
+def _extract_parsing_text(values: dict[str, object]) -> str:
+    """Extract text fragments from PaddleOCR parsing results."""
+    parsing_items = values.get("parsing_res_list")
+    if not isinstance(parsing_items, list):
+        return ""
+    chunks = [
+        text
+        for item in parsing_items
+        if isinstance(item, dict)
+        for text in [_string_keyed_values(item).get("text")]
+        if isinstance(text, str) and text.strip()
+    ]
+    return "\n".join(chunks)
+
+
 def _extract_text_payload(payload: object) -> str:
     """Extract text content from PaddleOCR result payload."""
-    if payload is None:
-        return ""
-    if isinstance(payload, dict):
-        for key in ("markdown", "text", "rec_text", "ocr_text"):
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                return value
-
-        chunks: list[str] = []
-        parsing_items = payload.get("parsing_res_list")
-        if isinstance(parsing_items, list):
-            for item in parsing_items:
-                if isinstance(item, dict):
-                    text = item.get("text")
-                    if isinstance(text, str) and text.strip():
-                        chunks.append(text)
-        if chunks:
-            return "\n".join(chunks)
-
-    raw = str(payload).strip()
-    return raw
+    if not isinstance(payload, dict):
+        return str(payload).strip() if payload is not None else ""
+    values = _string_keyed_values(payload)
+    for key in ("markdown", "text", "rec_text", "ocr_text"):
+        value = values.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return _extract_parsing_text(values)
 
 
 def _predict_single_image(page: BytesIO) -> str | None:

@@ -1,4 +1,4 @@
-"""OCR services for text extraction using OpenRouter API."""
+"""OCR services for text extraction using OpenRouter API via httpx."""
 
 import asyncio
 import logging
@@ -6,24 +6,10 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 
-from openai import AsyncOpenAI
 from PIL import Image
 
-from server.config import Settings
-from utils import b64tools, imagetools
-
-# Global OCR client for reuse
-_ocr_client = None
-
-
-def _get_ocr_client() -> AsyncOpenAI:
-    """Get or create OCR client following lazy initialization pattern."""
-    global _ocr_client
-    if _ocr_client is None:
-        _ocr_client = AsyncOpenAI(
-            base_url=Settings.openrouter_base_url, api_key=Settings.openrouter_api_key
-        )
-    return _ocr_client
+from utils.files import b64tools, imagetools
+from utils.integrations.openrouter import complete_chat_json
 
 
 @lru_cache(maxsize=1)
@@ -46,15 +32,14 @@ async def text_enhancement(
 ) -> str:
     """Enhance OCR text quality using LLM post-processing."""
     prompt = _read_text_enhancement_prompt()
-    client = _get_ocr_client()
-    response = await client.chat.completions.create(
-        model=model,
-        messages=[
+    response = await complete_chat_json({
+        "model": model,
+        "messages": [
             {"role": "system", "content": prompt},
             {"role": "user", "content": text},
         ],
-    )
-    return response.choices[0].message.content.strip()
+    })
+    return response["choices"][0]["message"]["content"].strip()
 
 
 async def ocr_to_text(
@@ -63,26 +48,34 @@ async def ocr_to_text(
 ) -> str | None:
     """Extract text from an image using OpenRouter API."""
     try:
-        client = _get_ocr_client()
         prompt = _read_ocr_prompt()
-        data_url = b64tools.b64_file(image)
+        image.seek(0)
+        with Image.open(image) as opened_image:
+            data_url = b64tools.b64_file(opened_image.copy())
 
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": [{"type": "text", "text": prompt}]},
+        response = await complete_chat_json({
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": prompt}],
+                },
                 {
                     "role": "user",
-                    "content": [{"type": "image_url", "image_url": {"url": data_url}}],
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": data_url},
+                        }
+                    ],
                 },
             ],
-        )
+        })
     except Exception:
-        # Log error but don't raise to allow other pages to process
         logging.exception("OCR extraction failed")
         return None
 
-    return response.choices[0].message.content.strip()
+    return response["choices"][0]["message"]["content"].strip()
 
 
 async def process_pages_batch(
@@ -104,7 +97,7 @@ async def process_pages_batch(
 # Image preprocessing functions following Single Responsibility Principle
 def _prepare_pdf_pages(file_content: BytesIO) -> list[BytesIO]:
     """Extract and convert PDF pages to JPEG bytes."""
-    from utils import pdftools
+    from utils.files import pdftools
 
     pages_image: list[Image.Image] = pdftools.extract_pdf_bytes_pages(file_content)
     return [imagetools.convert_to_jpg_bytes(page) for page in pages_image]

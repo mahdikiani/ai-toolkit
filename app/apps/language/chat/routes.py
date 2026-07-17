@@ -1,14 +1,16 @@
 """Chat sessions, threads, messages, and persisted assistant replies."""
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
-from fastapi_mongo_base.schemas import PaginatedResponse
+from fastapi_mongo_base.schemas import BaseEntitySchema, PaginatedResponse
 from fastapi_mongo_base.utils import usso_routes
+from usso import UserData
 from usso.integrations.fastapi import USSOAuthentication
 
+from apps.language.shared.exceptions import ThreadNotFoundError
 from server.config import Settings
 
 from .models import ChatMessage, ChatSession, ChatThread
@@ -16,6 +18,10 @@ from .schemas import (
     ChatCompletionResponse,
     ChatMessageCreate,
     ChatMessageSchema,
+    ChatQuickStartCreate,
+    ChatQuickStartResponse,
+    ChatQuickThreadCreate,
+    ChatQuickThreadResponse,
     ChatSessionCreate,
     ChatSessionSchema,
     ChatSessionUpdate,
@@ -23,8 +29,11 @@ from .schemas import (
     ChatThreadSchema,
 )
 from .services import (
+    bootstrap_session,
     complete_assistant_message,
     iter_openrouter_sse_deltas,
+    maybe_apply_session_title_if_ready,
+    maybe_apply_suggested_thread_title,
     messages_as_openrouter,
     thread_model,
 )
@@ -43,14 +52,33 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
             user_dependency=USSOAuthentication(), prefix="/sessions", tags=["Chat"]
         )
 
-    def config_schemas(self, schema: type) -> None:
+    def config_schemas(self, schema: type[BaseEntitySchema], **kwargs: object) -> None:
         """Config schemas."""
-        super().config_schemas(schema)
+        super().config_schemas(schema, **kwargs)
         self.create_request_schema = ChatSessionCreate
         self.update_request_schema = ChatSessionUpdate
 
-    def config_routes(self, **kwargs: object) -> None:
+    def config_routes(
+        self,
+        *,
+        prefix: str = "",
+        list_route: bool = True,
+        retrieve_route: bool = True,
+        create_route: bool = True,
+        update_route: bool = True,
+        delete_route: bool = True,
+        statistics_route: bool = False,
+        mine_route: bool = False,
+        **kwargs: object,
+    ) -> None:
         """Register nested routes before generic `/{uid}` handlers."""
+        self.router.add_api_route(
+            "/{session_uid}/messages",
+            self.quick_new_thread,
+            methods=["POST"],
+            status_code=201,
+            response_model=None,
+        )
         self.router.add_api_route(
             "/{session_uid}/threads",
             self.list_session_threads,
@@ -80,8 +108,19 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
             "/{session_uid}/threads/{thread_uid}/messages",
             self.post_message,
             methods=["POST"],
+            response_model=None,
         )
-        super().config_routes(**kwargs)
+        super().config_routes(
+            prefix=prefix,
+            list_route=list_route,
+            retrieve_route=retrieve_route,
+            create_route=create_route,
+            update_route=update_route,
+            delete_route=delete_route,
+            statistics_route=statistics_route,
+            mine_route=mine_route,
+            **kwargs,
+        )
 
     async def create_item(
         self,
@@ -96,21 +135,45 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
             user=user,
             filter_data=data.model_dump(exclude_none=True),
         )
-        session = await ChatSession.create_item({
-            "title": data.title,
-            "user_id": self._owner_id_for_create(user),
-            "tenant_id": user.tenant_id,
-        })
-        thread = await ChatThread.create_item({
-            "session_uid": session.uid,
-            "title": data.initial_thread_title or "Thread 1",
-            "chat_model": data.initial_chat_model,
-            "user_id": self._owner_id_for_create(user),
-            "tenant_id": user.tenant_id,
-        })
-        session.active_thread_uid = thread.uid
-        await session.save()
+        owner_id = self._owner_id_for_create(user)
+        session, _thread = await bootstrap_session(
+            user_id=owner_id,
+            title=data.title,
+            thread_title=data.initial_thread_title,
+            chat_model=data.initial_chat_model,
+            suggest_title=True,
+        )
         return session
+
+    async def update_item(
+        self,
+        request: Request,
+        uid: str,
+        data: ChatSessionUpdate,
+    ) -> ChatSession:
+        """Patch session metadata; validate active_thread_uid belongs to session."""
+        user = await self.get_user(request)
+        patch = data.model_dump(exclude_unset=True)
+        session = await self.get_item(
+            uid=uid,
+            user_id=None,
+            ignore_user_id=True,
+        )
+        await self.authorize(
+            action="update",
+            user=user,
+            filter_data=session.model_dump(),
+        )
+        active_uid = patch.get("active_thread_uid")
+        if active_uid is not None:
+            thread = await ChatThread.get_item(
+                uid=active_uid,
+                user_id=None,
+                ignore_user_id=True,
+            )
+            if thread is None or thread.session_uid != session.uid:
+                raise ThreadNotFoundError()
+        return await ChatSession.update_item(session, patch)
 
     async def list_session_threads(
         self,
@@ -124,7 +187,6 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
         user = await self.get_user(request)
         session = await self.get_item(
             uid=session_uid,
-            tenant_id=user.tenant_id,
             user_id=None,
             ignore_user_id=True,
         )
@@ -135,7 +197,6 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
         )
         filters = self.get_list_filter_queries(user=user)
         items, total = await ChatThread.list_total_combined(
-            tenant_id=user.tenant_id,
             offset=offset,
             limit=limit,
             session_uid=session_uid,
@@ -159,7 +220,6 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
         user = await self.get_user(request)
         session = await self.get_item(
             uid=session_uid,
-            tenant_id=user.tenant_id,
             user_id=None,
             ignore_user_id=True,
         )
@@ -172,7 +232,6 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
             **data.model_dump(exclude_none=True),
             "session_uid": session.uid,
             "user_id": self._owner_id_for_create(user),
-            "tenant_id": user.tenant_id,
         })
 
     async def retrieve_thread(
@@ -186,7 +245,6 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
         user = await self.get_user(request)
         session = await self.get_item(
             uid=session_uid,
-            tenant_id=user.tenant_id,
             user_id=None,
             ignore_user_id=True,
         )
@@ -197,12 +255,11 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
         )
         thread = await ChatThread.get_item(
             uid=thread_uid,
-            tenant_id=user.tenant_id,
             user_id=None,
             ignore_user_id=True,
         )
         if thread is None or thread.session_uid != session.uid:
-            raise HTTPException(status_code=404, detail="Thread not found")
+            raise ThreadNotFoundError()
         await self.authorize(
             action="read",
             user=user,
@@ -223,7 +280,6 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
         thread = await self.retrieve_thread(request, session_uid, thread_uid)
         filters = self.get_list_filter_queries(user=await self.get_user(request))
         items, total = await ChatMessage.list_total_combined(
-            tenant_id=thread.tenant_id,
             offset=offset,
             limit=limit,
             thread_uid=thread.uid,
@@ -236,29 +292,111 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
             limit=limit,
         )
 
-    async def post_message(  # noqa: ANN201
+    async def _message_reply(
+        self,
+        *,
+        user: UserData,
+        thread: ChatThread,
+        data: ChatMessageCreate,
+        user_msg: ChatMessage,
+        stream_done_extra: dict | None = None,
+        after_reply: Callable[[], Awaitable[None]] | None = None,
+    ) -> ChatCompletionResponse | StreamingResponse:
+        """Generate assistant reply for an already-persisted user message."""
+        if not data.generate_reply:
+            return ChatCompletionResponse(
+                user_message=ChatMessageSchema.model_validate(user_msg),
+                assistant_message=None,
+            )
+
+        owner_id = self._owner_id_for_create(user)
+
+        if data.stream:
+
+            async def sse() -> AsyncIterator[str]:
+                chunks: list[str] = []
+                payload = {
+                    "model": thread_model(thread),
+                    "messages": await messages_as_openrouter(thread),
+                    "temperature": 0.7,
+                }
+                async for delta in iter_openrouter_sse_deltas(payload):
+                    chunks.append(delta)
+                    chunk_evt = json.dumps(
+                        {"choices": [{"delta": {"content": delta}}]},
+                        ensure_ascii=False,
+                    )
+                    yield f"data: {chunk_evt}\n\n"
+                full = "".join(chunks)
+                assistant = await ChatMessage.create_item({
+                    "thread_uid": thread.uid,
+                    "user_id": owner_id,
+                    "role": "assistant",
+                    "content": full.strip(),
+                    "completion_extra": {"model": payload["model"], "streamed": True},
+                })
+                if after_reply is not None:
+                    await after_reply()
+                done_evt = json.dumps(
+                    {
+                        "assistant_message_uid": assistant.uid,
+                        **(stream_done_extra or {}),
+                    },
+                    ensure_ascii=False,
+                )
+                yield f"data: {done_evt}\n\n"
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(sse(), media_type="text/event-stream")
+
+        assistant = await complete_assistant_message(
+            thread=thread,
+            user_id=owner_id,
+        )
+        if after_reply is not None:
+            await after_reply()
+        return ChatCompletionResponse(
+            user_message=ChatMessageSchema.model_validate(user_msg),
+            assistant_message=ChatMessageSchema.model_validate(assistant),
+        )
+
+    async def quick_start(
         self,
         request: Request,
-        session_uid: str,
-        thread_uid: str,
-        data: ChatMessageCreate,
-    ):  # -> ChatCompletionResponse | StreamingResponse:
-        """Append a message; optionally run assistant completion."""
-        """Post a user message and optionally generate an assistant reply."""
+        data: ChatQuickStartCreate,
+    ) -> ChatQuickStartResponse | StreamingResponse:
+        """Create session + thread and handle the first message in one call."""
         user = await self.get_user(request)
-        thread = await self.retrieve_thread(request, session_uid, thread_uid)
-
+        await self.authorize(
+            action="create",
+            user=user,
+            filter_data=data.model_dump(exclude_none=True),
+        )
+        owner_id = self._owner_id_for_create(user)
+        session, thread = await bootstrap_session(
+            user_id=owner_id,
+            title=data.title,
+            thread_title=data.thread_title,
+            chat_model=data.chat_model,
+            suggest_title=data.suggest_title,
+        )
         user_msg = await ChatMessage.create_item({
             "thread_uid": thread.uid,
-            "user_id": self._owner_id_for_create(user),
-            "tenant_id": user.tenant_id,
+            "user_id": owner_id,
             "role": data.role,
             "content": data.content,
             "reply_to_uid": data.reply_to_uid,
         })
 
         if not data.generate_reply:
-            return ChatCompletionResponse(
+            session = await maybe_apply_session_title_if_ready(
+                session=session,
+                thread=thread,
+                user_id=owner_id,
+            )
+            return ChatQuickStartResponse(
+                session=ChatSessionSchema.model_validate(session),
+                thread=ChatThreadSchema.model_validate(thread),
                 user_message=ChatMessageSchema.model_validate(user_msg),
                 assistant_message=None,
             )
@@ -282,14 +420,23 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
                 full = "".join(chunks)
                 assistant = await ChatMessage.create_item({
                     "thread_uid": thread.uid,
-                    "user_id": self._owner_id_for_create(user),
-                    "tenant_id": user.tenant_id,
+                    "user_id": owner_id,
                     "role": "assistant",
                     "content": full.strip(),
                     "completion_extra": {"model": payload["model"], "streamed": True},
                 })
+                session_after = await maybe_apply_session_title_if_ready(
+                    session=session,
+                    thread=thread,
+                    user_id=owner_id,
+                )
                 done_evt = json.dumps(
-                    {"assistant_message_uid": assistant.uid},
+                    {
+                        "assistant_message_uid": assistant.uid,
+                        "session_uid": session_after.uid,
+                        "thread_uid": thread.uid,
+                        "session_title": session_after.title,
+                    },
                     ensure_ascii=False,
                 )
                 yield f"data: {done_evt}\n\n"
@@ -299,14 +446,196 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
 
         assistant = await complete_assistant_message(
             thread=thread,
-            user_id=self._owner_id_for_create(user),
-            tenant_id=user.tenant_id,
+            user_id=owner_id,
         )
-        return ChatCompletionResponse(
+        session = await maybe_apply_session_title_if_ready(
+            session=session,
+            thread=thread,
+            user_id=owner_id,
+        )
+        return ChatQuickStartResponse(
+            session=ChatSessionSchema.model_validate(session),
+            thread=ChatThreadSchema.model_validate(thread),
             user_message=ChatMessageSchema.model_validate(user_msg),
             assistant_message=ChatMessageSchema.model_validate(assistant),
         )
 
+    async def quick_new_thread(
+        self,
+        request: Request,
+        session_uid: str,
+        data: ChatQuickThreadCreate,
+    ) -> ChatQuickThreadResponse | StreamingResponse:
+        """Create a new thread in a session and handle its first message."""
+        user = await self.get_user(request)
+        session = await self.get_item(
+            uid=session_uid,
+            user_id=None,
+            ignore_user_id=True,
+        )
+        await self.authorize(
+            action="read",
+            user=user,
+            filter_data=session.model_dump(),
+        )
+        owner_id = self._owner_id_for_create(user)
+        thread = await ChatThread.create_item({
+            "session_uid": session.uid,
+            "title": data.thread_title,
+            "chat_model": data.chat_model,
+            "user_id": owner_id,
+        })
+        session.active_thread_uid = thread.uid
+        await session.save()
 
+        user_msg = await ChatMessage.create_item({
+            "thread_uid": thread.uid,
+            "user_id": owner_id,
+            "role": data.role,
+            "content": data.content,
+            "reply_to_uid": data.reply_to_uid,
+        })
+
+        if not data.generate_reply:
+            thread = await maybe_apply_suggested_thread_title(
+                thread=thread,
+                user_id=owner_id,
+                user_content=data.content,
+                assistant_content=None,
+                title=data.thread_title,
+                suggest_title=data.suggest_thread_title,
+            )
+            return ChatQuickThreadResponse(
+                thread=ChatThreadSchema.model_validate(thread),
+                user_message=ChatMessageSchema.model_validate(user_msg),
+                assistant_message=None,
+            )
+
+        if data.stream:
+
+            async def sse() -> AsyncIterator[str]:
+                chunks: list[str] = []
+                payload = {
+                    "model": thread_model(thread),
+                    "messages": await messages_as_openrouter(thread),
+                    "temperature": 0.7,
+                }
+                async for delta in iter_openrouter_sse_deltas(payload):
+                    chunks.append(delta)
+                    chunk_evt = json.dumps(
+                        {"choices": [{"delta": {"content": delta}}]},
+                        ensure_ascii=False,
+                    )
+                    yield f"data: {chunk_evt}\n\n"
+                full = "".join(chunks)
+                assistant = await ChatMessage.create_item({
+                    "thread_uid": thread.uid,
+                    "user_id": owner_id,
+                    "role": "assistant",
+                    "content": full.strip(),
+                    "completion_extra": {"model": payload["model"], "streamed": True},
+                })
+                thread_after = await maybe_apply_suggested_thread_title(
+                    thread=thread,
+                    user_id=owner_id,
+                    user_content=data.content,
+                    assistant_content=full,
+                    title=data.thread_title,
+                    suggest_title=data.suggest_thread_title,
+                    model=thread_model(thread),
+                )
+                done_evt = json.dumps(
+                    {
+                        "assistant_message_uid": assistant.uid,
+                        "thread_uid": thread_after.uid,
+                        "thread_title": thread_after.title,
+                    },
+                    ensure_ascii=False,
+                )
+                yield f"data: {done_evt}\n\n"
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(sse(), media_type="text/event-stream")
+
+        assistant = await complete_assistant_message(
+            thread=thread,
+            user_id=owner_id,
+        )
+        thread = await maybe_apply_suggested_thread_title(
+            thread=thread,
+            user_id=owner_id,
+            user_content=data.content,
+            assistant_content=assistant.content,
+            title=data.thread_title,
+            suggest_title=data.suggest_thread_title,
+        )
+        return ChatQuickThreadResponse(
+            thread=ChatThreadSchema.model_validate(thread),
+            user_message=ChatMessageSchema.model_validate(user_msg),
+            assistant_message=ChatMessageSchema.model_validate(assistant),
+        )
+
+    async def post_message(
+        self,
+        request: Request,
+        session_uid: str,
+        thread_uid: str,
+        data: ChatMessageCreate,
+    ) -> ChatCompletionResponse | StreamingResponse:
+        """Append a message; optionally run assistant completion."""
+        """Post a user message and optionally generate an assistant reply."""
+        user = await self.get_user(request)
+        thread = await self.retrieve_thread(request, session_uid, thread_uid)
+        session = await self.get_item(
+            uid=session_uid,
+            user_id=None,
+            ignore_user_id=True,
+        )
+        owner_id = self._owner_id_for_create(user)
+
+        user_msg = await ChatMessage.create_item({
+            "thread_uid": thread.uid,
+            "user_id": owner_id,
+            "role": data.role,
+            "content": data.content,
+            "reply_to_uid": data.reply_to_uid,
+        })
+
+        async def after_title() -> None:
+            nonlocal session
+            session = await maybe_apply_session_title_if_ready(
+                session=session,
+                thread=thread,
+                user_id=owner_id,
+            )
+
+        if not data.generate_reply:
+            session = await maybe_apply_session_title_if_ready(
+                session=session,
+                thread=thread,
+                user_id=owner_id,
+            )
+            return ChatCompletionResponse(
+                user_message=ChatMessageSchema.model_validate(user_msg),
+                assistant_message=None,
+            )
+
+        return await self._message_reply(
+            user=user,
+            thread=thread,
+            data=data,
+            user_msg=user_msg,
+            after_reply=after_title,
+        )
+
+
+chat_session_router = ChatSessionRouter()
 router = APIRouter(prefix="/chat", tags=["Chat"])
-router.include_router(ChatSessionRouter().router)
+router.add_api_route(
+    "/messages",
+    chat_session_router.quick_start,
+    methods=["POST"],
+    status_code=201,
+    response_model=None,
+)
+router.include_router(chat_session_router.router)

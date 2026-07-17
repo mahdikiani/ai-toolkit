@@ -7,7 +7,9 @@ from pathlib import Path
 
 from anyio import Path as AsyncPath
 
-from utils import archive_utils, finance, media, mime, pdftools
+from utils.billing import finance
+from utils.files import archive_utils, mime, pdftools
+from utils.integrations import media
 
 from .file_processors import CONVERTING_IMAGE_EXTS, IMAGE_EXTS, is_ocr_required
 from .models import OcrTask
@@ -28,7 +30,7 @@ def get_pages(file_path: Path) -> int:
         return 0
 
 
-async def process_file(file_path: Path) -> str:
+async def process_file(file_path: Path) -> str | None:
     """Process file and return extracted text."""
     from .services import process_pages_batch
 
@@ -37,7 +39,7 @@ async def process_file(file_path: Path) -> str:
     file_type = mime.check_file_type(file_content)
 
     if not is_ocr_required(file_type):
-        return process_direct_file(file_path, file_type)
+        return process_direct_file(file_content, file_type)
 
     # OCR processing (PDF, images)
     pages = prepare_pages(file_content, file_type)
@@ -56,7 +58,10 @@ async def process_compressed_archive(
     """Process compressed archive and return extracted text."""
     from .services import save_error, save_result
 
-    temp_dir, extracted_paths = archive_utils.extract_archive(file_content, file_type)
+    extracted_archive = archive_utils.extract_archive(file_content, file_type)
+    if extracted_archive is None:
+        return await save_error(task, "Failed to extract archive")
+    temp_dir, extracted_paths = extracted_archive
     if not extracted_paths:
         return await save_error(task, "Failed to extract archive")
 
@@ -69,9 +74,6 @@ async def process_compressed_archive(
     await archive_utils.process_directory_files(
         temp_dir, temp_dir / "ocrs", process_file
     )
-
-    # logging.info("OCRs: %s", ocrs)
-
     zip_buffer = archive_utils.compress_directory_to_zip(temp_dir / "ocrs")
     upload_result = await media.upload_file(zip_buffer)
     shutil.rmtree(temp_dir, ignore_errors=True)

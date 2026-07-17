@@ -4,14 +4,15 @@ import base64
 from io import BytesIO
 
 from fastapi import BackgroundTasks, Depends, File, Query, Request, UploadFile
-from fastapi.responses import PlainTextResponse, StreamingResponse
-from fastapi_mongo_base.routes import AbstractTaskRouter, PaginatedResponse
-from fastapi_mongo_base.utils import usso_routes
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
+from fastapi_mongo_base.routes import PaginatedResponse
+from pydantic import BaseModel
 from soniox.types import TranscriptionWebhook
-from usso.integrations.fastapi import USSOAuthentication
 
 from server.config import Settings
-from utils import speechmatics
+from utils.auth import authorize_create_on_behalf
+from utils.integrations import speechmatics
+from utils.task_routes import AbstractTaskUSSORouter
 
 from . import services
 from .models import TranscribeTask
@@ -23,7 +24,7 @@ from .schemas import (
 )
 
 
-class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
+class TranscribeRouter(AbstractTaskUSSORouter):
     """Router for transcription task management endpoints."""
 
     model = TranscribeTask
@@ -32,7 +33,7 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
     def __init__(self) -> None:
         """Initialize the transcribe router with authentication and configuration."""
         super().__init__(
-            user_dependency=USSOAuthentication(),
+            user_dependency=None,
             draftable=False,
             prefix="/transcribes",
             tags=["Transcribe"],
@@ -75,7 +76,7 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
         offset: int = Query(0, ge=0),
         limit: int = Query(10, ge=1, le=Settings.page_max_limit),
         user_id: str | None = None,
-    ) -> PaginatedResponse[TranscribeTaskSchema]:
+    ) -> PaginatedResponse[BaseModel]:
         """List transcription tasks with pagination."""
         return await self._list_items(request, offset, limit, user_id=user_id)
 
@@ -84,27 +85,20 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
         request: Request,
         data: TranscribeTaskSchemaCreate,
         background_tasks: BackgroundTasks,
-        blocking: bool = False,
     ) -> TranscribeTask:
         """Create a new transcription task from a file URL."""
         user = await self.get_user(request)
-        data.user_id = data.user_id or user.user_id
-        if data.user_id != user.user_id:
-            await self.authorize(
-                action="create", user=user, filter_data=data.model_dump()
-            )
+        await authorize_create_on_behalf(self, request, user, data)
 
         item = await self.model.create_item({
             **data.model_dump(exclude_none=True),
             "tenant_id": user.tenant_id,
+            "user_id": data.user_id or user.uid,
         })
-        if blocking:
-            await item.start_processing()
-        else:
-            background_tasks.add_task(item.start_processing)
+        background_tasks.add_task(item.start_processing)
         return item
 
-    async def get_result(self, request: Request, uid: str):  # noqa: ANN201
+    async def get_result(self, request: Request, uid: str) -> Response:
         """Retrieve the result of a completed transcription task."""
         task: TranscribeTask = await self.retrieve_item(request, uid)
 
@@ -129,7 +123,6 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
         data_form: TranscribeTaskUploadFormSchema = Depends(
             TranscribeTaskUploadFormSchema.as_form
         ),
-        blocking: bool = Query(False),
     ) -> TranscribeTask:
         """Create a transcription task from a direct multipart upload."""
         file_content = await file.read()
@@ -137,27 +130,21 @@ class TranscribeRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter)
         mime_type = file.content_type or "application/octet-stream"
         data = TranscribeTaskSchemaCreate(
             file_url=f"data:{mime_type};base64,{encoded_file}",
-            audio_duration_seconds=data_form.audio_duration_seconds,
-            provider=data_form.provider,
-            model=data_form.model,
-            user_id=data_form.user_id,
-            webhook_url=data_form.webhook_url,
+            **data_form.model_dump(exclude_none=True),
         )
-        return await self.create_item(request, data, background_tasks, blocking)
+        return await self.create_item(request, data, background_tasks)
 
     async def create_item_with_base64(
         self,
         request: Request,
         data: TranscribeTaskBase64Schema,
         background_tasks: BackgroundTasks,
-        blocking: bool = Query(False),
     ) -> TranscribeTask:
         """Create a transcription task from a base64 encoded payload."""
         return await self.create_item(
             request,
             data.to_create_schema(),
             background_tasks,
-            blocking,
         )
 
     async def webhook(

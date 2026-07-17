@@ -11,12 +11,13 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import PlainTextResponse, StreamingResponse
-from fastapi_mongo_base.routes import AbstractTaskRouter, PaginatedResponse
-from fastapi_mongo_base.utils import usso_routes
-from usso.integrations.fastapi import USSOAuthentication
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
+from fastapi_mongo_base.routes import PaginatedResponse
+from pydantic import BaseModel
 
 from server.config import Settings
+from utils.auth import authorize_create_on_behalf
+from utils.task_routes import AbstractTaskUSSORouter
 
 from .models import OcrTask
 from .schemas import (
@@ -27,7 +28,7 @@ from .schemas import (
 )
 
 
-class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
+class OCRRouter(AbstractTaskUSSORouter):
     """Router for OCR task management endpoints."""
 
     model = OcrTask
@@ -36,7 +37,7 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
     def __init__(self) -> None:
         """Initialize the OCR router with authentication and configuration."""
         super().__init__(
-            user_dependency=USSOAuthentication(),
+            user_dependency=None,
             draftable=False,
             prefix="/ocrs",
             tags=["OCR"],
@@ -73,7 +74,7 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         offset: int = Query(0, ge=0),
         limit: int = Query(10, ge=1, le=Settings.page_max_limit),
         user_id: str | None = None,
-    ) -> PaginatedResponse[OcrTaskSchema]:
+    ) -> PaginatedResponse[BaseModel]:
         """List OCR tasks with pagination."""
         return await self._list_items(request, offset, limit, user_id=user_id)
 
@@ -82,28 +83,20 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         request: Request,
         data: OcrTaskSchemaCreate,
         background_tasks: BackgroundTasks,
-        blocking: bool = False,
     ) -> OcrTask:
         """Create a new OCR task from a file URL."""
         user = await self.get_user(request)
-        data.user_id = data.user_id or user.user_id
-        if data.user_id != user.user_id:
-            await self.authorize(
-                action="create", user=user, filter_data=data.model_dump()
-            )
+        await authorize_create_on_behalf(self, request, user, data)
 
         item: OcrTask = await self.model.create_item({
             **data.model_dump(exclude_none=True),
             "tenant_id": user.tenant_id,
-            "task_status": "init",
+            "user_id": data.user_id or user.uid,
         })
-        if blocking:
-            await item.start_processing()
-        else:
-            background_tasks.add_task(item.start_processing)
+        background_tasks.add_task(item.start_processing)
         return item
 
-    async def get_result(self, request: Request, uid: str):  # noqa: ANN201
+    async def get_result(self, request: Request, uid: str) -> Response:
         """Retrieve the result of a completed OCR task."""
         task: OcrTask = await self.retrieve_item(request, uid)
 
@@ -126,7 +119,6 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         background_tasks: BackgroundTasks,
         file: UploadFile = File(...),
         data_form: OcrTaskUploadFormSchema = Depends(OcrTaskUploadFormSchema.as_form),
-        blocking: bool = Query(False),
     ) -> OcrTask:
         """Create an OCR task by directly uploading a file."""
         file_content = await file.read()
@@ -146,7 +138,6 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
             request=request,
             data=data,
             background_tasks=background_tasks,
-            blocking=blocking,
         )
 
     async def create_item_with_base64(
@@ -154,14 +145,12 @@ class OCRRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         request: Request,
         data: OcrTaskBase64Schema,
         background_tasks: BackgroundTasks,
-        blocking: bool = Query(False),
     ) -> OcrTask:
         """Create an OCR task from a base64 encoded payload."""
         return await self.create_item(
             request=request,
             data=data.to_create_schema(),
             background_tasks=background_tasks,
-            blocking=blocking,
         )
 
 

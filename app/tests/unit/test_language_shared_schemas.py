@@ -16,6 +16,12 @@ from apps.language.shared.schemas import (
 )
 
 
+def content_parts(message: MessageBlock) -> list[ContentPart]:
+    """Return the normalized content after verifying its documented shape."""
+    assert all(isinstance(part, ContentPart) for part in message.content)
+    return [part for part in message.content if isinstance(part, ContentPart)]
+
+
 @pytest.mark.unit
 class TestRoleEnum:
     """Tests for Role enum values."""
@@ -99,6 +105,7 @@ class TestContentPartValidation:
         """Should reject text ContentPart without text field."""
         with pytest.raises(ValidationError) as exc_info:
             ContentPart(type=ContentType.TEXT, text=None)
+        assert isinstance(exc_info.value, ValidationError)
         errors = exc_info.value.errors()
         assert any(
             "text is required when type=text" in str(e["ctx"]["error"]) for e in errors
@@ -124,6 +131,7 @@ class TestContentPartValidation:
         """Should reject image ContentPart without file_url."""
         with pytest.raises(ValidationError) as exc_info:
             ContentPart(type=ContentType.IMAGE, file_url=None)
+        assert isinstance(exc_info.value, ValidationError)
         errors = exc_info.value.errors()
         assert any(
             "file_url is required when type=image or document" in str(e["ctx"]["error"])
@@ -143,6 +151,7 @@ class TestContentPartValidation:
         """Should reject document ContentPart without file_url."""
         with pytest.raises(ValidationError) as exc_info:
             ContentPart(type=ContentType.DOCUMENT, file_url=None)
+        assert isinstance(exc_info.value, ValidationError)
         errors = exc_info.value.errors()
         assert any(
             "file_url is required when type=image or document" in str(e["ctx"]["error"])
@@ -231,42 +240,42 @@ class TestRoundTripPreservation:
         original = "Hello world"
         msg = MessageBlock(role=Role.USER, content=original)
         # Extract text back from ContentPart
-        reconstructed = msg.content[0].text
+        reconstructed = content_parts(msg)[0].text
         assert reconstructed == original
 
     def test_multiline_string_round_trip(self) -> None:
         """Multiline string should preserve through round-trip."""
         original = "Line 1\nLine 2\nLine 3"
         msg = MessageBlock(role=Role.USER, content=original)
-        reconstructed = msg.content[0].text
+        reconstructed = content_parts(msg)[0].text
         assert reconstructed == original
 
     def test_string_with_special_chars_round_trip(self) -> None:
         """String with special characters should preserve through round-trip."""
         original = "Hello! @#$%^&*() 你好 مرحبا"
         msg = MessageBlock(role=Role.USER, content=original)
-        reconstructed = msg.content[0].text
+        reconstructed = content_parts(msg)[0].text
         assert reconstructed == original
 
     def test_empty_string_round_trip(self) -> None:
         """Empty string should preserve through round-trip."""
         original = ""
         msg = MessageBlock(role=Role.USER, content=original)
-        reconstructed = msg.content[0].text
+        reconstructed = content_parts(msg)[0].text
         assert reconstructed == original
 
     def test_whitespace_string_round_trip(self) -> None:
         """String with whitespace should preserve through round-trip."""
         original = "  Hello  \n  World  "
         msg = MessageBlock(role=Role.USER, content=original)
-        reconstructed = msg.content[0].text
+        reconstructed = content_parts(msg)[0].text
         assert reconstructed == original
 
     def test_unicode_string_round_trip(self) -> None:
         """Unicode string should preserve through round-trip."""
         original = "Hello 世界 🌍 مرحبا بالعالم"
         msg = MessageBlock(role=Role.USER, content=original)
-        reconstructed = msg.content[0].text
+        reconstructed = content_parts(msg)[0].text
         assert reconstructed == original
 
 
@@ -299,6 +308,7 @@ class TestValidationErrorMessages:
         """Should provide clear error message for missing content."""
         with pytest.raises(ValidationError) as exc_info:
             MessageBlock(role=Role.USER)
+        assert isinstance(exc_info.value, ValidationError)
         errors = exc_info.value.errors()
         assert any(e["loc"] == ("content",) for e in errors)
         assert any(e["type"] == "missing" for e in errors)
@@ -368,8 +378,8 @@ class TestMixedContentScenarios:
         ]
         msg = MessageBlock(role=Role.USER, content=parts)
         assert len(msg.content) == 2
-        assert msg.content[0].type == ContentType.TEXT
-        assert msg.content[1].type == ContentType.IMAGE
+        assert content_parts(msg)[0].type == ContentType.TEXT
+        assert content_parts(msg)[1].type == ContentType.IMAGE
 
     def test_text_and_document_content(self) -> None:
         """Should handle message with text and document."""
@@ -379,8 +389,8 @@ class TestMixedContentScenarios:
         ]
         msg = MessageBlock(role=Role.USER, content=parts)
         assert len(msg.content) == 2
-        assert msg.content[0].type == ContentType.TEXT
-        assert msg.content[1].type == ContentType.DOCUMENT
+        assert content_parts(msg)[0].type == ContentType.TEXT
+        assert content_parts(msg)[1].type == ContentType.DOCUMENT
 
     def test_multiple_attachments(self) -> None:
         """Should handle message with multiple attachments."""
@@ -399,5 +409,5 @@ class TestMixedContentScenarios:
         parts = [ContentPart(type=ContentType.IMAGE, file_url="photo.jpg")]
         msg = MessageBlock(role=Role.USER, content=parts)
         assert len(msg.content) == 1
-        assert msg.content[0].type == ContentType.IMAGE
-        assert msg.content[0].text is None
+        assert content_parts(msg)[0].type == ContentType.IMAGE
+        assert content_parts(msg)[0].text is None

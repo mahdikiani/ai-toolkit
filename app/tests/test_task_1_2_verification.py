@@ -1,5 +1,7 @@
 """Verification test for Task 1.2: Shared schema models."""
 
+import pytest
+
 from apps.language.shared.schemas import ContentPart, ContentType, MessageBlock, Role
 
 
@@ -35,20 +37,16 @@ def test_content_part_image() -> None:
 
 def test_content_part_validation_text_missing() -> None:
     """Test ContentPart validation fails when text is missing for TEXT type."""
-    try:
+    with pytest.raises(ValueError, match="text is required when type=text"):
         ContentPart(type=ContentType.TEXT, file_url="some_url")
-        raise AssertionError("Should have raised ValueError")
-    except ValueError as e:
-        assert "text is required when type=text" in str(e)
 
 
 def test_content_part_validation_file_url_missing() -> None:
     """Test ContentPart validation fails when file_url is missing for IMAGE type."""
-    try:
+    with pytest.raises(
+        ValueError, match="file_url is required when type=image or document"
+    ):
         ContentPart(type=ContentType.IMAGE, text="some text")
-        raise AssertionError("Should have raised ValueError")
-    except ValueError as e:
-        assert "file_url is required when type=image or document" in str(e)
 
 
 def test_message_block_string_normalization() -> None:
@@ -80,12 +78,12 @@ def test_round_trip_preservation() -> None:
     original_text = "This is my message"
     msg = MessageBlock(role=Role.USER, content=original_text)
     # Extract text back from ContentPart
+    assert isinstance(msg.content[0], ContentPart)
     extracted_text = msg.content[0].text
     assert extracted_text == original_text
 
 
 if __name__ == "__main__":
-
     test_role_enum()
     test_content_type_enum()
     test_content_part_text()

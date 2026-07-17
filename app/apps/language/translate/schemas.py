@@ -16,7 +16,7 @@ class TranslateSchemaCreate(BaseModel):
     user_id: str | None = None
 
 
-class TranslateSchema(UserOwnedEntitySchema, TaskMixin, TranslateSchemaCreate):  # type: ignore[misc]
+class TranslateSchema(UserOwnedEntitySchema, TaskMixin, TranslateSchemaCreate):
     """Complete translation task schema including result and usage fields."""
 
     result: str | None = None

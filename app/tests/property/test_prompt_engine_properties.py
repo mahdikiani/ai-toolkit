@@ -83,9 +83,7 @@ class TestPromptEngineRenderingDeterminism:
 
     @given(st.text(max_size=100))
     @settings(max_examples=50)
-    def test_text_variable_rendering_is_deterministic(
-        self, text_value: str
-    ) -> None:
+    def test_text_variable_rendering_is_deterministic(self, text_value: str) -> None:
         """Rendering with text variables should be deterministic."""
         with TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

@@ -2,7 +2,8 @@
 
 import logging
 import os
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Mapping
+from typing import cast
 
 import httpx
 import pytest
@@ -10,6 +11,8 @@ import pytest_asyncio
 from beanie import init_beanie
 from fastapi_mongo_base import models as base_mongo_models
 from fastapi_mongo_base.utils.basic import get_all_subclasses
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorClientSession
+from pymongo.asynchronous.database import AsyncDatabase
 
 from server.config import Settings
 from server.server import app as fastapi_app
@@ -20,48 +23,53 @@ pytest_plugins = ["tests.fixtures.file_fixtures"]
 Settings.finance_api_key = None
 
 
-@pytest.fixture(scope="session", autouse=True)  # noqa: RUF076
-def setup_debugpy() -> None:
-    """Set up debugpy for remote debugging if enabled."""
-    if os.getenv("DEBUGPY", "False").lower() in ("true", "1", "yes"):
-        import debugpy  # noqa: T100
-
-        debugpy.listen(("127.0.0.1", 3020))  # noqa: T100
-        logging.info("Waiting for debugpy client")
-        debugpy.wait_for_client()  # noqa: T100
-
-
 @pytest.fixture(scope="session")
-def mongo_client() -> Generator[object]:
+def mongo_client() -> Generator[AsyncIOMotorClient[dict[str, object]]]:
     """Create a mock MongoDB client for testing."""
     from mongomock_motor import AsyncMongoMockClient
 
-    client: AsyncMongoMockClient = AsyncMongoMockClient()
+    client: AsyncIOMotorClient[dict[str, object]] = AsyncMongoMockClient()
     yield client
 
 
-async def init_db(mongo_client: object) -> None:
+async def init_db(mongo_client: AsyncIOMotorClient[dict[str, object]]) -> None:
     """Initialize Beanie ORM with the test database."""
-    database = mongo_client.get_database("test_db")  # type: ignore
+    database = mongo_client.get_database("test_db")
 
     original_list_collection_names = database.list_collection_names
 
-    async def list_collection_names(*args: object, **kwargs: object) -> list[str]:
+    async def list_collection_names(
+        session: AsyncIOMotorClientSession | None = None,
+        comment: object | None = None,
+        **kwargs: object,
+    ) -> list[str]:
         """Compatibility wrapper for older mongomock_motor versions."""
+        filter_value = kwargs.pop("filter", None)
+        filter_data = (
+            {key: value for key, value in filter_value.items() if isinstance(key, str)}
+            if isinstance(filter_value, Mapping)
+            else None
+        )
         kwargs.pop("authorizedCollections", None)
         kwargs.pop("nameOnly", None)
-        return await original_list_collection_names(*args, **kwargs)
+        return await original_list_collection_names(
+            session=session, filter=filter_data, comment=comment, **kwargs
+        )
 
-    database.list_collection_names = list_collection_names
+    database.list_collection_names: Callable[..., Awaitable[list[str]]] = (
+        list_collection_names
+    )
 
     await init_beanie(
-        database=database,  # type: ignore
+        database=cast(AsyncDatabase[dict[str, object]], database),
         document_models=get_all_subclasses(base_mongo_models.BaseEntity),
     )
 
 
 @pytest_asyncio.fixture(scope="session")
-async def db(mongo_client: object) -> AsyncGenerator[None]:
+async def db(
+    mongo_client: AsyncIOMotorClient[dict[str, object]],
+) -> AsyncGenerator[None]:
     """Initialize and cleanup the test database."""
     Settings.config_logger()
     logging.info("Initializing test database")

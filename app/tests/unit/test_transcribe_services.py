@@ -211,7 +211,7 @@ class TestSaveResult:
     async def test_sets_completed_status(self) -> None:
         """save_result should set task status to completed."""
         task = MagicMock()
-        task.save = AsyncMock(return_value=task)
+        task.save_report = AsyncMock()
 
         await save_result(task, "Transcribed text")
 
@@ -220,7 +220,7 @@ class TestSaveResult:
     async def test_normalizes_text(self) -> None:
         """save_result should normalize the result text."""
         task = MagicMock()
-        task.save = AsyncMock(return_value=task)
+        task.save_report = AsyncMock()
 
         await save_result(task, "  Text with spaces  ")
 
@@ -229,12 +229,22 @@ class TestSaveResult:
     async def test_saves_usage_info(self) -> None:
         """save_result should save usage amount and ID."""
         task = MagicMock()
-        task.save = AsyncMock(return_value=task)
+        task.save_report = AsyncMock()
 
         await save_result(task, "text", usage_amount=10.0, usage_id="usage_456")
 
         assert task.usage_amount == pytest.approx(10.0)
         assert task.usage_id == "usage_456"
+
+    async def test_emits_webhook_after_result_is_stored(self) -> None:
+        """save_result persists the result before the completion webhook emits."""
+        task = MagicMock()
+        task.save_report = AsyncMock()
+
+        await save_result(task, "Transcribed text")
+
+        assert task.result == "Transcribed text"
+        task.save_report.assert_awaited_once_with("Task processed successfully")
 
 
 @pytest.mark.unit
@@ -406,7 +416,7 @@ class TestTranscriptionQuotaAndMetering:
         )
 
         chunk_plan = ChunkPlan(
-            duration_ms=10000, chunks=[chunk1, chunk2], workspace=Path("/tmp/test")
+            duration_ms=10000, chunks=[chunk1, chunk2], workspace=Path("test")
         )
 
         # Mock chunk results with costs
@@ -573,9 +583,7 @@ class TestTranscriptionErrorHandling:
         chunk = AudioChunk(
             chunk_id=0, start_ms=0, end_ms=5000, file_path=Path("c0.wav")
         )
-        chunk_plan = ChunkPlan(
-            duration_ms=5000, chunks=[chunk], workspace=Path("/tmp/test")
-        )
+        chunk_plan = ChunkPlan(duration_ms=5000, chunks=[chunk], workspace=Path("test"))
 
         mock_job = MagicMock()
         mock_job.id = "job_123"
@@ -694,3 +702,184 @@ class TestTranscriptionErrorHandling:
 
         assert result.task_status == TaskStatusEnum.error
         task.save_report.assert_called_once()
+
+
+@pytest.mark.unit
+class TestTranscribeFileContent:
+    """Tests for TranscribeTaskSchemaCreate.file_content."""
+
+    async def test_returns_cached_content(self) -> None:
+        """file_content should return cached _file_content if set."""
+        from io import BytesIO
+
+        from apps.transcribe.schemas import TranscribeTaskSchemaCreate
+
+        schema = TranscribeTaskSchemaCreate(file_url="https://example.com/a.mp3")
+        cached = BytesIO(b"cached data")
+        schema._file_content = cached
+
+        result = await schema.file_content()
+        assert result is cached
+
+    async def test_decodes_base64_data_url(self, mock_audio_bytes: bytes) -> None:
+        """file_content should decode base64-encoded data URLs."""
+        import base64
+
+        from apps.transcribe.schemas import TranscribeTaskSchemaCreate
+
+        encoded = base64.b64encode(mock_audio_bytes).decode("utf-8")
+        schema = TranscribeTaskSchemaCreate(file_url=f"data:audio/wav;base64,{encoded}")
+
+        content = await schema.file_content()
+        assert content.read() == mock_audio_bytes
+
+    async def test_handles_invalid_base64(self) -> None:
+        """file_content should not crash on invalid base64 data URLs."""
+        from apps.transcribe.schemas import TranscribeTaskSchemaCreate
+
+        schema = TranscribeTaskSchemaCreate(
+            file_url="data:audio/wav;base64,!!!invalid!!!"
+        )
+
+        content = await schema.file_content()
+        assert content.read() == b""
+
+    async def test_fetches_from_http_url(self) -> None:
+        """file_content should fetch content from HTTP URLs."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from apps.transcribe.schemas import TranscribeTaskSchemaCreate
+
+        schema = TranscribeTaskSchemaCreate(file_url="https://example.com/a.mp3")
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_response = MagicMock()
+            mock_response.content = b"audio data"
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            content = await schema.file_content()
+            assert content.read() == b"audio data"
+
+
+@pytest.mark.unit
+class TestTranscribeFileContentBase64:
+    """Tests for TranscribeTaskSchemaCreate.file_content_base64."""
+
+    async def test_returns_base64_encoded_content(
+        self, mock_audio_bytes: bytes
+    ) -> None:
+        """file_content_base64 should return base64 string of content."""
+        import base64
+
+        from apps.transcribe.schemas import TranscribeTaskSchemaCreate
+
+        encoded = base64.b64encode(mock_audio_bytes).decode("utf-8")
+        schema = TranscribeTaskSchemaCreate(file_url=f"data:audio/wav;base64,{encoded}")
+
+        result = await schema.file_content_base64()
+        assert result == encoded
+
+
+@pytest.mark.unit
+class TestTranscribeUploadFormSchema:
+    """Tests for TranscribeTaskUploadFormSchema.as_form."""
+
+    def test_as_form_parses_fields(self) -> None:
+        """as_form should parse form fields correctly."""
+        from apps.transcribe.schemas import TranscribeTaskUploadFormSchema
+
+        result = TranscribeTaskUploadFormSchema.as_form(
+            audio_duration_seconds=30.0,
+            provider="soniox",
+            model="whisper-1",
+            user_id="user_123",
+            webhook_url="https://hook.example.com",
+        )
+
+        assert result.audio_duration_seconds == pytest.approx(30.0)
+        assert result.provider == "soniox"
+        assert result.model == "whisper-1"
+        assert result.user_id == "user_123"
+        assert result.webhook_url == "https://hook.example.com"
+
+    def test_as_form_uses_defaults(self) -> None:
+        """as_form should use defaults for missing fields."""
+        from apps.transcribe.schemas import TranscribeTaskUploadFormSchema
+
+        result = TranscribeTaskUploadFormSchema.as_form(
+            audio_duration_seconds=None,
+            provider="soniox",
+            model=None,
+            user_id=None,
+            webhook_url=None,
+        )
+
+        assert result.provider == "soniox"
+        assert result.audio_duration_seconds is None
+
+
+@pytest.mark.unit
+class TestTranscribeBase64ToCreateSchema:
+    """Tests for TranscribeTaskBase64Schema.to_create_schema."""
+
+    def test_to_create_schema_builds_data_url(self) -> None:
+        """Should build a data URL from base64 content."""
+        from apps.transcribe.schemas import TranscribeTaskBase64Schema
+
+        schema = TranscribeTaskBase64Schema(
+            content_base64="ZmFrZQ==",
+            mime_type="audio/wav",
+            audio_duration_seconds=2.0,
+            provider="soniox",
+        )
+
+        create = schema.to_create_schema()
+        assert create.file_url == "data:audio/wav;base64,ZmFrZQ=="
+        assert create.audio_duration_seconds == pytest.approx(2.0)
+        assert create.provider == "soniox"
+
+    def test_to_create_schema_preserves_data_url(self) -> None:
+        """Should not re-wrap if already a data URL."""
+        from apps.transcribe.schemas import TranscribeTaskBase64Schema
+
+        schema = TranscribeTaskBase64Schema(
+            content_base64="data:audio/wav;base64,ZmFrZQ==",
+        )
+
+        create = schema.to_create_schema()
+        assert create.file_url == "data:audio/wav;base64,ZmFrZQ=="
+
+
+@pytest.mark.unit
+class TestTranscribeAudioDurationMetaData:
+    """Tests for TranscribeTaskSchema audio_duration with meta_data fallback."""
+
+    def test_uses_meta_data_audio_duration_seconds(self) -> None:
+        """audio_duration should fall back to meta_data.audio_duration_seconds."""
+        from apps.transcribe.schemas import TranscribeTaskSchema
+
+        task = TranscribeTaskSchema(
+            uid="task_123",
+            user_id="user_123",
+            file_url="https://example.com/audio.mp3",
+            meta_data={"audio_duration_seconds": 42.5},
+        )
+
+        assert task.audio_duration == pytest.approx(42.5)
+
+    def test_uses_meta_data_audio_duration_ms(self) -> None:
+        """audio_duration should fall back to meta_data.audio_duration_ms."""
+        from apps.transcribe.schemas import TranscribeTaskSchema
+
+        task = TranscribeTaskSchema(
+            uid="task_123",
+            user_id="user_123",
+            file_url="https://example.com/audio.mp3",
+            meta_data={"audio_duration_ms": 55000},
+        )
+
+        assert task.audio_duration == pytest.approx(55.0)

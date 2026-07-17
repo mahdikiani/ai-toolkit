@@ -1,6 +1,7 @@
 """Simple archive utilities - extract to temp directory, compress from directory."""
 
 import asyncio
+import inspect
 import shutil
 from collections.abc import Awaitable, Callable
 from io import BytesIO
@@ -121,10 +122,10 @@ def compress_directory_to_zip(directory: Path) -> BytesIO:
     return zip_buffer
 
 
-async def run_directory_files(
+async def run_directory_files[T](
     input_dir: Path,
-    file_processor: Callable[[Path], object | Awaitable[object] | None],
-) -> list[Path]:
+    file_processor: Callable[[Path], T | Awaitable[T]],
+) -> list[T]:
     """
     Process all files in a directory using the provided processor.
 
@@ -143,12 +144,12 @@ async def run_directory_files(
 
     semaphore = asyncio.Semaphore(10)
 
-    async def process_path(file_path: AsyncPath) -> str | None:
+    async def process_path(file_path: AsyncPath) -> T:
         async with semaphore:
-            if asyncio.iscoroutinefunction(file_processor):
-                return await file_processor(file_path)
-            else:
-                return file_processor(file_path)
+            result = file_processor(Path(file_path))
+            if inspect.isawaitable(result):
+                return await result
+            return result
 
     results = await asyncio.gather(*(process_path(p) for p in file_paths))
     return results
@@ -179,12 +180,11 @@ async def process_directory_files(
 
     semaphore = asyncio.Semaphore(10)
 
-    async def process_path(file_path: AsyncPath) -> str | None:
+    async def process_path(file_path: AsyncPath) -> Path | None:
         async with semaphore:
-            if asyncio.iscoroutinefunction(file_processor):
-                text = await file_processor(file_path)
-            else:
-                text = file_processor(file_path)
+            text = file_processor(Path(file_path))
+            if inspect.isawaitable(text):
+                text = await text
 
             if text:
                 # Preserve directory structure

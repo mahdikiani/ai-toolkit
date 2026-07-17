@@ -3,7 +3,6 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from decimal import Decimal
-from typing import Any
 
 import httpx
 from ufaas import exceptions
@@ -32,7 +31,10 @@ def _insufficient_funds_error(message: str) -> exceptions.InsufficientFundsError
         return error
 
 
-DEFAULT_PRICING: dict[str, Any] = {
+PricingSection = dict[str, object]
+PricingConfig = dict[str, PricingSection]
+
+DEFAULT_PRICING: PricingConfig = {
     "text": {
         "markup": 1.0,
         "default_per_1k_tokens": 1.0,
@@ -53,11 +55,23 @@ DEFAULT_PRICING: dict[str, Any] = {
 }
 
 
-def pricing_config() -> dict[str, Any]:
+def _pricing_section(value: object) -> PricingSection:
+    """Normalize an untrusted pricing section to string-keyed values."""
+    if not isinstance(value, dict):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str)}
+
+
+def pricing_config() -> PricingConfig:
     """Return configured pricing rules with safe defaults."""
     configured = getattr(Settings, "pricing", None)
     if isinstance(configured, dict):
-        return {**DEFAULT_PRICING, **configured}
+        configured_sections = {
+            key: _pricing_section(value)
+            for key, value in configured.items()
+            if isinstance(key, str)
+        }
+        return {**DEFAULT_PRICING, **configured_sections}
     return DEFAULT_PRICING
 
 
@@ -80,10 +94,10 @@ def estimate_text_cost(
             total_tokens = int(usage.get("prompt_tokens") or 0) + int(
                 usage.get("completion_tokens") or 0
             )
-    model_pricing = pricing.get("models", {}).get(model or "", {})
+    model_pricing = _pricing_section(pricing.get("models")).get(model or "", {})
+    model_pricing = _pricing_section(model_pricing)
     per_1k = float(
-        model_pricing.get("per_1k_tokens")
-        or pricing.get("default_per_1k_tokens", 1.0)
+        model_pricing.get("per_1k_tokens") or pricing.get("default_per_1k_tokens", 1.0)
     )
     return (total_tokens / 1000) * per_1k * markup
 
@@ -91,7 +105,8 @@ def estimate_text_cost(
 def estimate_ocr_cost(*, pages: int, engine: str | None = None) -> float:
     """Estimate OCR cost by page count and engine."""
     pricing = pricing_config()["ocr"]
-    engine_pricing = pricing.get("engines", {}).get(engine or "", {})
+    engine_pricing = _pricing_section(pricing.get("engines")).get(engine or "", {})
+    engine_pricing = _pricing_section(engine_pricing)
     per_page = float(engine_pricing.get("per_page") or pricing["default_per_page"])
     return max(0, pages) * per_page
 
@@ -99,7 +114,8 @@ def estimate_ocr_cost(*, pages: int, engine: str | None = None) -> float:
 def estimate_transcribe_cost(*, minutes: float, provider: str = "soniox") -> float:
     """Estimate transcription cost by duration and provider."""
     pricing = pricing_config()["transcribe"]
-    provider_pricing = pricing.get("providers", {}).get(provider, {})
+    provider_pricing = _pricing_section(pricing.get("providers")).get(provider, {})
+    provider_pricing = _pricing_section(provider_pricing)
     per_minute = float(provider_pricing.get("per_minute", 1.0))
     return max(0.0, minutes) * per_minute
 
@@ -126,7 +142,7 @@ async def get_ufaas_client() -> AsyncGenerator[httpx.AsyncClient]:
 
 async def meter_cost(
     user_id: str, amount: float, meta_data: dict | None = None
-) -> UsageSchema:
+) -> UsageSchema | None:
     """
     Record usage cost for a user.
 
@@ -178,7 +194,7 @@ async def get_quota(user_id: str) -> Decimal:
     return quotas.quota
 
 
-async def cancel_usage(usage_id: str) -> None:
+async def cancel_usage(usage_id: str | None) -> None:
     """
     Cancel a previously recorded usage.
 
@@ -214,7 +230,8 @@ async def check_quota(
     """
     quota = await get_quota(user_id)
     if raise_exception and (quota is None or quota < coin):
-        raise _insufficient_funds_error(
+        error = _insufficient_funds_error(
             f"You have only {quota} coins, while you need {coin} coins."
         )
+        raise error
     return quota

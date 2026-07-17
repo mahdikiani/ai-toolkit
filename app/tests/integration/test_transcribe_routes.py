@@ -42,7 +42,7 @@ class TestTranscribeRoutes:
     async def test_get_transcribe_result_not_found(
         self, client: httpx.AsyncClient
     ) -> None:
-        """GET /transcribes/{uid}/result for non-existent task should return 401 or 404."""
+        """Return 401 or 404 for an unknown transcription result."""
         response = await client.get("/transcribes/nonexistent_uid_12345/result")
         assert response.status_code in (401, 403, 404)
 

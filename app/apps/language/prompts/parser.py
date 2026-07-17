@@ -5,7 +5,20 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from jinja2 import Environment, meta
+from jinja2 import Environment, meta, select_autoescape
+
+
+class PromptFileNotFoundError(FileNotFoundError):
+    """Raised when a prompt file does not exist."""
+
+
+class PromptFileFormatError(TypeError):
+    """Raised when a prompt file does not contain a mapping."""
+
+
+def _template_environment() -> Environment:
+    """Create an environment that safely escapes rendered HTML templates."""
+    return Environment(autoescape=select_autoescape())
 
 
 def extract_jinja2_variables(template_str: str) -> set[str]:
@@ -18,7 +31,7 @@ def extract_jinja2_variables(template_str: str) -> set[str]:
     Returns:
         Set of variable names found in the template
     """
-    env = Environment()
+    env = _template_environment()
     try:
         ast = env.parse(template_str)
         return meta.find_undeclared_variables(ast)
@@ -39,27 +52,25 @@ def infer_field_type(variable_name: str, context: dict[str, Any]) -> str:
         The inferred type as a string
     """
     # Check if we have an example value in context
+    value = context.get(variable_name)
+    type_map = {
+        bool: "boolean",
+        int: "integer",
+        float: "number",
+        list: "array",
+        dict: "object",
+    }
     if variable_name in context:
-        value = context[variable_name]
-        if isinstance(value, bool):
-            return "boolean"
-        elif isinstance(value, int):
-            return "integer"
-        elif isinstance(value, float):
-            return "number"
-        elif isinstance(value, list):
-            return "array"
-        elif isinstance(value, dict):
-            return "object"
+        for value_type, field_type in type_map.items():
+            if isinstance(value, value_type):
+                return field_type
 
     # Infer from variable name patterns
-    if variable_name.endswith("_id"):
-        return "string"
-    elif variable_name.startswith("is_") or variable_name.startswith("has_"):
+    if variable_name.startswith(("is_", "has_")):
         return "boolean"
-    elif variable_name.endswith("_count") or variable_name.endswith("_number"):
+    if variable_name.endswith(("_count", "_number")):
         return "integer"
-    elif variable_name.endswith("_list") or variable_name.endswith("_items"):
+    if variable_name.endswith(("_list", "_items")):
         return "array"
 
     return "string"
@@ -80,13 +91,15 @@ def parse_prompt_file(prompt_path: Path) -> dict[str, Any]:
         yaml.YAMLError: If the YAML is invalid
     """
     if not prompt_path.exists():
-        raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
+        error = PromptFileNotFoundError(f"Prompt file not found: {prompt_path}")
+        raise error
 
     with open(prompt_path, encoding="utf-8") as f:
         content = yaml.safe_load(f)
 
     if not isinstance(content, dict):
-        raise ValueError(f"Invalid prompt file format: {prompt_path}")
+        error = PromptFileFormatError(f"Invalid prompt file format: {prompt_path}")
+        raise error
 
     # Extract metadata
     name = content.get("name", prompt_path.stem)
@@ -182,7 +195,7 @@ def render_prompt(prompt_path: Path, context: dict[str, Any]) -> dict[str, Any]:
     """
     prompt_data = parse_prompt_file(prompt_path)
 
-    env = Environment()
+    env = _template_environment()
     rendered_messages = []
 
     for message in prompt_data["messages"]:

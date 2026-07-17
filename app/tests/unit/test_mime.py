@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from utils.mime import check_file_type
+from utils.files.mime import check_file_type
 
 
 @pytest.mark.unit
@@ -14,7 +14,7 @@ class TestCheckFileType:
 
     def test_detects_pdf(self, mock_pdf_bytes: bytes) -> None:
         """check_file_type should detect PDF files."""
-        with patch("utils.mime.magic.Magic") as mock_magic_cls:
+        with patch("utils.files.mime.magic.Magic") as mock_magic_cls:
             mock_magic = MagicMock()
             mock_magic.from_buffer.return_value = "application/pdf"
             mock_magic_cls.return_value = mock_magic
@@ -28,7 +28,7 @@ class TestCheckFileType:
         # JPEG magic bytes
         jpeg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 100
 
-        with patch("utils.mime.magic.Magic") as mock_magic_cls:
+        with patch("utils.files.mime.magic.Magic") as mock_magic_cls:
             mock_magic = MagicMock()
             mock_magic.from_buffer.return_value = "image/jpeg"
             mock_magic_cls.return_value = mock_magic
@@ -39,7 +39,7 @@ class TestCheckFileType:
 
     def test_detects_png(self, mock_png_bytes: bytes) -> None:
         """check_file_type should detect PNG images."""
-        with patch("utils.mime.magic.Magic") as mock_magic_cls:
+        with patch("utils.files.mime.magic.Magic") as mock_magic_cls:
             mock_magic = MagicMock()
             mock_magic.from_buffer.return_value = "image/png"
             mock_magic_cls.return_value = mock_magic
@@ -52,7 +52,7 @@ class TestCheckFileType:
         """check_file_type should detect ZIP from magic bytes when octet-stream."""
         zip_bytes = b"PK\x03\x04" + b"\x00" * 100
 
-        with patch("utils.mime.magic.Magic") as mock_magic_cls:
+        with patch("utils.files.mime.magic.Magic") as mock_magic_cls:
             mock_magic = MagicMock()
             # First call returns octet-stream, triggering ZIP fallback
             mock_magic.from_buffer.return_value = "application/octet-stream"
@@ -68,7 +68,7 @@ class TestCheckFileType:
         buf = BytesIO(data)
         buf.seek(50)  # Move pointer to middle
 
-        with patch("utils.mime.magic.Magic") as mock_magic_cls:
+        with patch("utils.files.mime.magic.Magic") as mock_magic_cls:
             mock_magic = MagicMock()
             mock_magic.from_buffer.return_value = "image/jpeg"
             mock_magic_cls.return_value = mock_magic

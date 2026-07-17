@@ -519,4 +519,6 @@ class TestOcrQuotaAndErrorHandling:
             result = await process_ocr(task)
 
         assert result.task_status == TaskStatusEnum.error
-        task.save_report.assert_called_once_with("error")
+        task.save_report.assert_called_once_with(
+            "OCR processing failed: Unexpected error"
+        )

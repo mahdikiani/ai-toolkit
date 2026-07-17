@@ -7,6 +7,7 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
+import httpx
 from beanie.exceptions import CollectionWasNotInitialized
 from fastapi_mongo_base.tasks import TaskStatusEnum
 from soniox import SonioxClient
@@ -15,17 +16,27 @@ from soniox.types import (
     TranscriptionConfig,
     TranscriptionJob,
     TranscriptionJobStatus,
+    TranscriptionResult,
     TranscriptionWebhook,
 )
 
 from server.config import Settings
-from utils import conditions, finance, texttools
+from utils import conditions, texttools
+from utils.billing import finance
 
 from . import chunker_ffmpeg as chunker
 from .models import TranscribeTask
 
 CHUNK_STORAGE_ROOT = Path(Settings.storage_path) / "transcribe-chunks"
 _soniox_client: SonioxClient | None = None
+
+
+class SonioxConfigurationError(RuntimeError):
+    """Raised when Soniox is used without its required configuration."""
+
+
+class TranscriptionJobError(RuntimeError):
+    """Raised when a Soniox transcription job fails."""
 
 
 class LazySonioxClient:
@@ -35,41 +46,50 @@ class LazySonioxClient:
         global _soniox_client
         if _soniox_client is None:
             if not Settings.soniox_api_key:
-                raise RuntimeError("SONIOX_API_KEY is not configured")
+                error = SonioxConfigurationError("SONIOX_API_KEY is not configured")
+                raise error
             _soniox_client = SonioxClient(Settings.soniox_api_key)
         return _soniox_client
 
-    async def transcribe_url_async(self, *args: object, **kwargs: object) -> object:
+    async def transcribe_url_async(
+        self,
+        url: str,
+        config: TranscriptionConfig | None = None,
+        **kwargs: object,
+    ) -> TranscriptionJob:
         """Proxy transcribe URL calls to a lazily-created client."""
-        return await self._client().transcribe_url_async(*args, **kwargs)
+        return await self._client().transcribe_url_async(url, config, **kwargs)
 
-    async def transcribe_file_async(self, *args: object, **kwargs: object) -> object:
+    async def transcribe_file_async(
+        self,
+        file_path: str,
+        config: TranscriptionConfig | None = None,
+        **kwargs: object,
+    ) -> TranscriptionJob:
         """Proxy transcribe file calls to a lazily-created client."""
-        return await self._client().transcribe_file_async(*args, **kwargs)
+        return await self._client().transcribe_file_async(file_path, config, **kwargs)
 
     async def get_transcription_job_async(
         self,
-        *args: object,
-        **kwargs: object,
-    ) -> object:
+        job_id: str,
+    ) -> TranscriptionJob:
         """Proxy job lookup calls to a lazily-created client."""
-        return await self._client().get_transcription_job_async(*args, **kwargs)
+        return await self._client().get_transcription_job_async(job_id)
 
     async def get_transcription_result_async(
         self,
-        *args: object,
-        **kwargs: object,
-    ) -> object:
+        job_id: str,
+    ) -> TranscriptionResult:
         """Proxy result lookup calls to a lazily-created client."""
-        return await self._client().get_transcription_result_async(*args, **kwargs)
+        return await self._client().get_transcription_result_async(job_id)
 
 
 soniox = LazySonioxClient()
 
 
-def get_soniox_client() -> SonioxClient:
+def get_soniox_client() -> LazySonioxClient:
     """Create a Soniox client only when transcription processing is requested."""
-    return soniox  # type: ignore[return-value]
+    return soniox
 
 
 def _task_provider(task: TranscribeTask) -> str:
@@ -135,20 +155,6 @@ async def _process_single_job(task: TranscribeTask, *, sync: bool) -> Transcribe
             job = await soniox.transcribe_file_async(tmp_file.name, config)
     else:
         job = await soniox.transcribe_url_async(task.file_url, config)
-
-    # job_id = await speechmatics.Speechmatics().create_transcribe_job(
-    #     task.file_url,
-    #     task.item_webhook_url,
-    #     # secret_token=task.secret_token,
-    #     # diarization=task.diarization,
-    #     language=(
-    #         # task.source_language.abbreviation
-    #         # if task.source_language != "auto"
-    #         # else
-    #         "auto"
-    #     ),
-    #     # enhanced=task.enhanced,
-    # )
 
     task.transcription_job_id = job.id
     task.task_status = TaskStatusEnum.processing
@@ -266,10 +272,11 @@ async def _transcribe_chunks(
             )
             job_result = await _wait_for_job_completion(job.id)
             if job_result.status != TranscriptionJobStatus.COMPLETED:
-                raise RuntimeError(
+                error = TranscriptionJobError(
                     f"Chunk {audio_chunk.chunk_id} "
                     f"failed with status {job_result.status}"
                 )
+                raise error
             transcript = await soniox.get_transcription_result_async(job.id)
             transcription_cost = math.ceil(
                 ((job_result.audio_duration_ms or audio_chunk.duration_ms) / 60000)
@@ -307,7 +314,8 @@ async def _wait_for_job_completion(job_id: str) -> TranscriptionJob:
         if job.status == TranscriptionJobStatus.COMPLETED:
             return job
         if job.status == TranscriptionJobStatus.ERROR:
-            raise RuntimeError(f"Job {job_id} failed: {job.error_message}")
+            error = TranscriptionJobError(f"Job {job_id} failed: {job.error_message}")
+            raise error
         await asyncio.sleep(Settings.transcribe_poll_interval_seconds)
 
 
@@ -333,12 +341,18 @@ def _build_transcription_config(
     use_webhook: bool = False,
 ) -> TranscriptionConfig:
     client_reference = f"{task.uid}:{chunk_id}" if chunk_id is not None else task.uid
-    return TranscriptionConfig(  # type: ignore[call-arg]
+    webhook_url = None
+    if use_webhook:
+        suffix = f"transcribes/{task.uid}/webhook"
+        if chunk_id is not None:
+            suffix = f"{suffix}/{chunk_id}"
+        webhook_url = f"https://{Settings.root_url}{Settings.base_path}/{suffix}"
+    return TranscriptionConfig(
         language_hints=[Language.PERSIAN, Language.ENGLISH],
         enable_language_identification=True,
         enable_speaker_diarization=True,
         client_reference_id=client_reference,
-        webhook_url=task.item_webhook_url if use_webhook else None,
+        webhook_url=webhook_url,
     )
 
 
@@ -347,7 +361,9 @@ async def save_error(
 ) -> TranscribeTask:
     """Save error result for a transcription task."""
     task.task_status = TaskStatusEnum.error
-    await task.save_report(message)
+    await task.update_and_emit(
+        task_report=message, log_type=kwargs.get("log_type", "error")
+    )
     await conditions.Conditions().release_condition(task.uid)
     logging.warning("Transcription rejected %s", f"{message}\n\n{kwargs}")
     return task
@@ -369,17 +385,15 @@ async def save_result(
         "model": task.model,
         "usage": {"audio_duration_seconds": task.audio_duration},
     }
-    return await task.save()
+    await task.update_and_emit(task_report="Task processed successfully")
+    return task
 
 
 async def process_transcription_webhook(
     task: TranscribeTask,
-    # data: speechmatics.TranscribeWebhookSchema
     data: TranscriptionWebhook,
 ) -> TranscribeTask:
     """Process transcription completion webhook and save results."""
-    # Process the webhook data
-    # Extract the sentences and timings from the data
     translation_cost = 0
 
     if not task.transcription_job_id or task.transcription_job_id != data.id:
@@ -397,17 +411,20 @@ async def process_transcription_webhook(
         provider=task.provider,
     )
     total_cost = transcription_cost + translation_cost
-    usage = await finance.meter_cost(
-        task.user_id,
-        total_cost,
-        meta_data={
-            "service": "transcribe",
-            "provider": task.provider,
-            "model": task.model,
-            "job_id": task.transcription_job_id,
-            "audio_duration_ms": job_result.audio_duration_ms,
-        },
-    )
+    try:
+        usage = await finance.meter_cost(
+            task.user_id,
+            total_cost,
+            meta_data={
+                "service": "transcribe",
+                "provider": task.provider,
+                "model": task.model,
+                "job_id": task.transcription_job_id,
+                "audio_duration_ms": job_result.audio_duration_ms,
+            },
+        )
+    except httpx.HTTPStatusError:
+        return await save_error(task, "payment_required")
     logging.info(
         "%s %s %s %s",
         task.uid,
@@ -416,8 +433,6 @@ async def process_transcription_webhook(
         transcription_cost,
     )
 
-    task.task_status = TaskStatusEnum.completed
-    await task.save_report("Task processed successfully")
     result = await soniox.get_transcription_result_async(task.transcription_job_id)
 
     await conditions.Conditions().release_condition(task.uid)
@@ -433,11 +448,6 @@ async def process_error_webhook(
     task: TranscribeTask, message: str = ""
 ) -> TranscribeTask:
     """Process error webhook for a failed transcription task."""
-    # speechmatic_task: speechmatics.JobDetails = (
-    #     await speechmatics.Speechmatics().get_transcribe_job(
-    #        task.transcription_job_id
-    #     )
-    # )
     if not task.transcription_job_id:
         return await save_error(task, "Transcription job ID is required")
     soniox = get_soniox_client()

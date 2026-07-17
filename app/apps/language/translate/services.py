@@ -1,15 +1,38 @@
 """Translation via the shared translate prompt + OpenRouter."""
 
+from pathlib import Path
+
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
 from apps.language.promptic.engine import PromptEngine, load_data
 from apps.language.promptic.services import call_openrouter
 from server.config import Settings
-from utils import finance, texttools
+from utils import texttools
+from utils.billing import finance
 
 from .models import TranslateTask
 
 TRANSLATE_PROMPT = "translate.yaml"
+
+
+class TranslatePromptFormatError(TypeError):
+    """Raised when the translate prompt does not contain a YAML mapping."""
+
+
+def _text_cost_value(value: object) -> int | float | str | None:
+    """Return a provider cost value accepted by the finance service."""
+    if isinstance(value, (int, float, str)):
+        return value
+    return None
+
+
+def _load_translate_metadata(prompt_path: Path) -> dict:
+    """Load and validate the translation prompt metadata."""
+    meta = load_data(prompt_path)
+    if not isinstance(meta, dict):
+        error = TranslatePromptFormatError("translate prompt must be a YAML mapping")
+        raise error
+    return meta
 
 
 async def process_translate(task: TranslateTask) -> TranslateTask:
@@ -24,9 +47,7 @@ async def process_translate(task: TranslateTask) -> TranslateTask:
         return task
 
     try:
-        meta = load_data(prompt_path)
-        if not isinstance(meta, dict):
-            raise TypeError("translate prompt must be a YAML mapping")
+        meta = _load_translate_metadata(prompt_path)
 
         engine = PromptEngine(base_dir=prompts_dir)
         input_variables = {
@@ -60,10 +81,11 @@ async def process_translate(task: TranslateTask) -> TranslateTask:
             provider_meta = {}
 
         provider_usage = provider_meta.get("usage") if provider_meta else None
+        raw_cost = provider_meta.get("raw_cost")
         amount = finance.estimate_text_cost(
             model=str(provider_meta.get("model") or model or ""),
             usage=provider_usage if isinstance(provider_usage, dict) else None,
-            raw_cost=provider_meta.get("raw_cost"),
+            raw_cost=_text_cost_value(raw_cost),
         )
         usage = await finance.meter_cost(
             task.user_id,

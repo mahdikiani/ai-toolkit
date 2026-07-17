@@ -3,18 +3,19 @@
 from io import BytesIO
 
 from fastapi import BackgroundTasks, Query, Request
-from fastapi.responses import PlainTextResponse, StreamingResponse
-from fastapi_mongo_base.routes import AbstractTaskRouter, PaginatedResponse
-from fastapi_mongo_base.utils import usso_routes
-from usso.integrations.fastapi import USSOAuthentication
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
+from fastapi_mongo_base.routes import PaginatedResponse
+from pydantic import BaseModel
 
 from server.config import Settings
+from utils.auth import authorize_create_on_behalf
+from utils.task_routes import AbstractTaskUSSORouter
 
 from .models import TranslateTask
 from .schemas import TranslateSchema, TranslateSchemaCreate
 
 
-class TranslateRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
+class TranslateRouter(AbstractTaskUSSORouter):
     """Router for translation task management endpoints."""
 
     model = TranslateTask
@@ -23,7 +24,7 @@ class TranslateRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
     def __init__(self) -> None:
         """Initialize the translate router with authentication and configuration."""
         super().__init__(
-            user_dependency=USSOAuthentication(),
+            user_dependency=None,
             draftable=False,
             prefix="/translates",
             tags=["Translate"],
@@ -44,7 +45,7 @@ class TranslateRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         offset: int = Query(0, ge=0),
         limit: int = Query(10, ge=1, le=Settings.page_max_limit),
         user_id: str | None = None,
-    ) -> PaginatedResponse[TranslateSchema]:
+    ) -> PaginatedResponse[BaseModel]:
         """List translation tasks with pagination."""
         return await self._list_items(request, offset, limit, user_id=user_id)
 
@@ -53,27 +54,20 @@ class TranslateRouter(AbstractTaskRouter, usso_routes.AbstractTenantUSSORouter):
         request: Request,
         data: TranslateSchemaCreate,
         background_tasks: BackgroundTasks,
-        blocking: bool = False,
     ) -> TranslateTask:
         """Create a new translation task."""
         user = await self.get_user(request)
-        data.user_id = data.user_id or user.user_id
-        if data.user_id != user.user_id:
-            await self.authorize(
-                action="create", user=user, filter_data=data.model_dump()
-            )
+        await authorize_create_on_behalf(self, request, user, data)
 
         item = await self.model.create_item({
             **data.model_dump(exclude_none=True),
             "tenant_id": user.tenant_id,
+            "user_id": data.user_id or user.uid,
         })
-        if blocking:
-            await item.start_processing()
-        else:
-            background_tasks.add_task(item.start_processing)
+        background_tasks.add_task(item.start_processing)
         return item
 
-    async def get_result(self, request: Request, uid: str):  # noqa: ANN201
+    async def get_result(self, request: Request, uid: str) -> Response:
         """Retrieve the result of a completed translation task."""
         task: TranslateTask = await self.retrieve_item(request, uid)
 

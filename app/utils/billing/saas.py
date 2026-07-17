@@ -8,6 +8,14 @@ from fastapi_mongo_base.utils.bsontools import decimal_amount
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
+class MissingUsageOwnerError(ValueError):
+    """Raised when a usage record has no user or enrollment owner."""
+
+
+class InvalidUsageAmountError(ValueError):
+    """Raised when a usage amount is not positive."""
+
+
 class Bundle(BaseModel):
     """Represents a resource bundle with asset and quota information."""
 
@@ -76,7 +84,10 @@ class UsageCreateSchema(BaseModel):
             ValueError: If neither user_id nor enrollment_id is provided.
         """
         if not self.user_id and not self.enrollment_id:
-            raise ValueError("Either user_id or enrollment_id must be provided")
+            error = MissingUsageOwnerError(
+                "Either user_id or enrollment_id must be provided"
+            )
+            raise error
         return self
 
     @field_validator("amount")
@@ -95,25 +106,18 @@ class UsageCreateSchema(BaseModel):
             ValueError: If amount is not greater than 0.
         """
         if value <= 0:
-            raise ValueError("Amount must be greater than 0")
+            error = InvalidUsageAmountError("Amount must be greater than 0")
+            raise error
         return value
 
 
 class UsageSchema(TenantUserEntitySchema):
     """Schema representing a usage record with consumption details."""
 
-    # enrollment_id: str
-    # asset: str
-    # amount: Decimal
-
     consumptions: list[UsageConsumption]
     asset: str
     amount: Decimal
     variant: str | None = None
-
-    # @classmethod
-    # def search_field_set(cls) -> list[str]:
-    #     return list(set(super().search_field_set() + ["asset", "variant"]))
 
     @classmethod
     def search_exclude_set(cls) -> list[str]:

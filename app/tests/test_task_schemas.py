@@ -45,16 +45,14 @@ class TestPrompticSchema:
 
     def test_schema_inheritance(self) -> None:
         """Test that ExecutionTaskSchema inherits all fields."""
-        task_data = {
-            "prompt_name": "test_prompt",
-            "input_variables": {"key": "value"},
-            "idempotency_key": "generated_key_123",
-            "user_id": "user_123",
-            "uid": "550e8400-e29b-41d4-a716-446655440000",
-            "task_status": TaskStatusEnum.init,
-        }
-
-        task = PrompticSchema(**task_data)
+        task = PrompticSchema(
+            prompt_name="test_prompt",
+            input_variables={"key": "value"},
+            idempotency_key="generated_key_123",
+            user_id="user_123",
+            uid="550e8400-e29b-41d4-a716-446655440000",
+            task_status=TaskStatusEnum.init,
+        )
 
         assert task.prompt_name == "test_prompt"
         assert task.input_variables == {"key": "value"}
@@ -75,6 +73,7 @@ class TestPrompticSchema:
                 task_status=TaskStatusEnum.init,
             )
 
+        assert isinstance(exc_info.value, ValidationError)
         errors = exc_info.value.errors()
         assert any(e["loc"] == ("idempotency_key",) for e in errors)
 

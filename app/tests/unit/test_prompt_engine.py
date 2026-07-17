@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from apps.language.promptic.engine.engine import (
     PromptEngine,
@@ -217,7 +218,7 @@ class TestPromptEngine:
         assert "Persian" in user
 
     def test_generates_response_format_from_schema(self, tmp_path: Path) -> None:
-        """PromptEngine should generate response_format when output_schema is defined."""
+        """Generate response_format when output_schema is defined."""
         component_file = tmp_path / "_components.yaml"
         component_file.write_text(
             "components:\n"
@@ -328,12 +329,12 @@ class TestPromptEngineErrorHandling:
 
         engine = PromptEngine(base_dir=tmp_path)
 
-        # yaml.safe_load will raise a YAMLError for malformed YAML
-        with pytest.raises(Exception):  # Could be yaml.YAMLError or similar
+        # yaml.safe_load raises YAMLError for malformed YAML.
+        with pytest.raises(yaml.YAMLError):
             engine.generate(prompt_file, {})
 
     def test_handles_missing_input_variables_gracefully(self, tmp_path: Path) -> None:
-        """PromptEngine should handle missing input variables with default empty values."""
+        """Handle missing input variables with default empty values."""
         prompt_file = tmp_path / "test_prompt.yaml"
         prompt_file.write_text(
             "task:\n"
@@ -350,7 +351,7 @@ class TestPromptEngineErrorHandling:
         assert "Process  in " in user
 
     def test_raises_for_undefined_jinja2_variables(self, tmp_path: Path) -> None:
-        """PromptEngine should raise error for undefined Jinja2 variables when strict."""
+        """Raise an error for undefined Jinja2 variables when strict."""
         prompt_file = tmp_path / "test_prompt.yaml"
         prompt_file.write_text(
             "task:\n"

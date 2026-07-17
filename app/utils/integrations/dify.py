@@ -10,6 +10,10 @@ import httpx
 from PIL import Image
 
 
+class DifyConfigurationError(ValueError):
+    """Raised when no Dify API key is configured."""
+
+
 class DifyClient(httpx.Client):
     """Synchronous HTTP client for the Dify API."""
 
@@ -25,10 +29,12 @@ class DifyClient(httpx.Client):
         """
         api_key = api_key or os.getenv("DIFY_API_KEY", "")
         if not api_key or not api_key.strip():
-            raise ValueError("DIFY_API_KEY environment variable is not set")
+            error = DifyConfigurationError(
+                "DIFY_API_KEY environment variable is not set"
+            )
+            raise error
 
         super().__init__(
-            # base_url="https://api.dify.ai/v1",
             base_url="https://api.morshed.pish.run/v1",
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=300,
@@ -135,9 +141,11 @@ class AsyncDifyClient(httpx.AsyncClient):
         """
         api_key = api_key or os.getenv("DIFY_API_KEY", "")
         if not api_key or not api_key.strip():
-            raise ValueError("DIFY_API_KEY environment variable is not set")
+            error = DifyConfigurationError(
+                "DIFY_API_KEY environment variable is not set"
+            )
+            raise error
         super().__init__(
-            # base_url="https://api.dify.ai/v1",
             base_url="https://api.morshed.pish.run/v1",
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=600,

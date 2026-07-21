@@ -54,14 +54,12 @@ FALLBACK_QUALITY = 60
 async def ocr_to_text(
     image: BytesIO,
     model: str | None = None,
-    layout_hint: str = "",
+    block_type: str = "paragraph",
 ) -> str:
-    """Extract text from a page image with smart fallback.
+    """Extract text from a single document element crop.
 
-    - First attempt: 2800px max-dim, JPEG quality 85.
-    - If the API *errors* (timeout, 413, 5xx), retry once at 1600px / quality 60.
-    - If the API returns empty content, accept it — the page may legitimately
-      contain only images/charts (the prompt inserts ![description](#) for those).
+    - Each element (title, paragraph, table, etc.) is sent to VLM independently.
+    - If the API errors, retry once at lower resolution.
     """
     prompt = _read_ocr_prompt()
     image.seek(0)
@@ -69,8 +67,9 @@ async def ocr_to_text(
     with Image.open(image) as opened_image:
         img = opened_image.copy()
 
+    context = f"Element type: {block_type}. Extract ONLY the visible text in this region."
     result, api_error = await _ocr_attempt(
-        img, prompt, model, layout_hint, max_dim=MAX_DIM, quality=85
+        img, prompt, model, context, max_dim=MAX_DIM, quality=85
     )
     if result is not None:
         return result
@@ -78,7 +77,7 @@ async def ocr_to_text(
     if api_error:
         logger.warning("OCR API error; retrying with fallback resolution")
         result, _ = await _ocr_attempt(
-            img, prompt, model, layout_hint,
+            img, prompt, model, context,
             max_dim=FALLBACK_DIM, quality=FALLBACK_QUALITY,
         )
         return result or ""

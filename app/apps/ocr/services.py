@@ -117,12 +117,13 @@ async def _process_with_pipeline(
 ) -> OcrTask:
     """Process OCR using the modern document pipeline."""
     from .pipeline.engine import DocumentPipeline
+    from .pipeline.layout_detector import LayoutBox
     from .pipeline.renderer import count_pdf_bytes
 
-    async def ocr_fn(crop_bytes: BytesIO, layout_hint: str = "") -> str:
+    async def ocr_fn(crop_bytes: BytesIO, element: LayoutBox) -> str:
         from .ocr_services import ocr_to_text
 
-        return await ocr_to_text(crop_bytes, layout_hint=layout_hint)
+        return await ocr_to_text(crop_bytes, block_type=element.type.value)
 
     page_count = count_pdf_bytes(file_content) if file_type == "application/pdf" else 1
     if page_count < 1:
@@ -144,6 +145,7 @@ async def _process_with_pipeline(
     else:
         result = await pipeline.process_image_bytes(file_content)
 
+    # Upload accumulated visual assets and replace asset:ID placeholders
     docx_url: str | None = None
     uploaded_assets: dict[str, str] = {}
     try:
@@ -152,59 +154,32 @@ async def _process_with_pipeline(
         from PIL import Image
         from utils.integrations.media import upload_file
 
+        assets = pipeline.get_assets()
+        for asset in assets:
+            try:
+                buf = BytesIO(asset["image_bytes"])
+                buf.seek(0)
+                url = await upload_file(buf)
+                if url:
+                    uploaded_assets[asset["id"]] = url
+            except Exception:
+                logger.exception("Failed to upload asset %s", asset["id"])
+
+        if uploaded_assets:
+            for asset_id, url in uploaded_assets.items():
+                result = result.replace(f"({asset_id})", f"({url})")
+
         page_images: list[Image.Image] = []
         if file_type == "application/pdf":
             file_content.seek(0)
             page_images = render_pdf_bytes(file_content, dpi=150)
-
-        if page_images:
-            visual_elements = await pipeline.extract_assets(page_images)
-            for page_num, elements in visual_elements.items():
-                page_idx = page_num - 1
-                if page_idx >= len(page_images):
-                    continue
-                parent_img = page_images[page_idx]
-                for elem in elements:
-                    x1 = max(0, int(elem.x1) - 5)
-                    y1 = max(0, int(elem.y1) - 5)
-                    x2 = min(parent_img.width, int(elem.x2) + 5)
-                    y2 = min(parent_img.height, int(elem.y2) + 5)
-                    if x2 <= x1 or y2 <= y1:
-                        continue
-                    crop = parent_img.crop((x1, y1, x2, y2))
-                    crop_buf = BytesIO()
-                    crop.save(crop_buf, format="PNG")
-                    crop_buf.seek(0)
-                    try:
-                        asset_url = await upload_file(crop_buf)
-                        if asset_url:
-                            uploaded_assets[elem.element_id] = asset_url
-                    except Exception:
-                        logger.exception("Failed to upload extracted image")
-
-        if uploaded_assets:
-            asset_list = list(uploaded_assets.values())
-            idx = 0
-            new_lines: list[str] = []
-            for line in result.split("\n"):
-                stripped = line.strip()
-                if stripped.startswith("![") and "(#)" in stripped:
-                    alt_end = stripped.index("](")
-                    alt = stripped[2:alt_end]
-                    url = asset_list[idx % len(asset_list)]
-                    new_lines.append(f"![{alt}]({url})")
-                    idx += 1
-                else:
-                    new_lines.append(line)
-            result = "\n".join(new_lines)
-
         file_content.seek(0)
         pdf_data = file_content.read() if file_type == "application/pdf" else None
         docx_buf = build_docx(result, page_images, pdf_data=pdf_data)
         docx_buf.seek(0)
         docx_url = await upload_file(docx_buf)
     except Exception:
-        logger.exception("DOCX generation / image extraction failed")
+        logger.exception("DOCX generation / asset upload failed")
 
     amount = finance.estimate_ocr_cost(pages=page_count, engine=engine.value)
     usage = await finance.meter_cost(

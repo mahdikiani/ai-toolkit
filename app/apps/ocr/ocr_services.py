@@ -7,6 +7,8 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 from PIL import Image
 
 from server.config import Settings

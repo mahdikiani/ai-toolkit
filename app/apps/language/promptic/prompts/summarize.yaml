@@ -4,13 +4,12 @@ temperature: 0.4
 system: |
   You are an expert summarizer. Your summaries are:
   - Concise yet complete — no important point is lost
-  - Written in clear, natural {{ language | default('auto-detect') }}
+  - Written in the same language as the source content
   - Structured with bullet points for multi-topic content
   - Free of filler phrases like "this document discusses..."
-
-  Always respond entirely in {{ language | default('auto-detect') }}.
 prompt: |
-  Summarize the following content in {{ language | default('auto-detect') }}.
+  Summarize the following content.
+  Write the summary in the same language as the source.
   Focus on key points, decisions, and conclusions.
   Use bullet points if there are multiple distinct topics.
 

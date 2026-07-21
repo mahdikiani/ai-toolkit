@@ -51,6 +51,29 @@ class DocumentPipeline:
         image = Image.open(image_bytes)
         return await self.process_image(image)
 
+    async def extract_assets(
+        self, images: list[Image.Image], min_confidence: float = 0.3
+    ) -> dict[int, list[LayoutBox]]:
+        """Run layout detection on page images and return visual elements.
+
+        Returns {page_number: [LayoutBox, ...]} for figures, charts, tables.
+        """
+        result: dict[int, list[LayoutBox]] = {}
+        for page_num, img in enumerate(images, 1):
+            processed = self.preprocessor.process(img) if self.enable_preprocessing else img
+            try:
+                elements = self.layout_detector.detect(processed, page_num)
+            except Exception:
+                continue
+            visual = [
+                e for e in elements
+                if e.type in (ElementType.figure, ElementType.chart, ElementType.table)
+                and e.confidence >= min_confidence
+            ]
+            if visual:
+                result[page_num] = visual
+        return result
+
     async def _process_images(self, images: list[Image.Image]) -> str:
         """Process a list of page images through the full pipeline."""
         all_text: list[str] = []
@@ -111,4 +134,9 @@ def _postprocess_output(text: str) -> str:
     text = re.sub(r"! \[", "![", text)
     text = re.sub(r"\(##?\)", "(#)", text)
     text = re.sub(r"https?://\s+", "", text)
-    return text
+
+    # Ensure display math $$...$$ is on its own line
+    text = re.sub(r"([^\n])\$\$", r"\1\n$$", text)
+    text = re.sub(r"\$\$([^\n])", r"$$\n\1", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()

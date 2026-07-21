@@ -95,21 +95,41 @@ class DocumentPipeline:
         else:
             processed = image
 
-        layout_hint = ""
+        layout_elements: list[LayoutBox] = []
         if self.enable_layout:
             try:
-                elements = self.layout_detector.detect(processed, page_number)
-                if elements:
-                    self.reading_order.resolve(elements)
-                    hints = [
-                        f"[{i}] ({element.type.value}) y={element.y1:.0f}–{element.y2:.0f}"
-                        for i, element in enumerate(elements, 1)
-                    ]
-                    layout_hint = "Page layout detected:\n" + "\n".join(hints)
+                layout_elements = self.layout_detector.detect(processed, page_number)
+                if layout_elements:
+                    self.reading_order.resolve(layout_elements)
             except Exception:
                 logger.warning("Layout detection failed for page %d", page_number)
 
-        page_text = await self._extract_element(processed, layout_hint)
+        # Whiteout figures and charts so they never go to the VLM
+        visual_markers: list[tuple[str, float]] = []
+        cleaned = processed.copy()
+        for elem in layout_elements:
+            if elem.type not in (ElementType.figure, ElementType.chart):
+                continue
+            x1 = max(0, int(elem.x1) - 2)
+            y1 = max(0, int(elem.y1) - 2)
+            x2 = min(cleaned.width, int(elem.x2) + 2)
+            y2 = min(cleaned.height, int(elem.y2) + 2)
+            cleaned.paste((255, 255, 255), (x1, y1, x2, y2))
+            marker_id = f"p{page_number:04d}-v{len(visual_markers) + 1:04d}"
+            visual_markers.append((marker_id, (y1 + y2) / 2))
+            logger.info("Whiteouted %s on page %d (y=%.0f)", elem.type.value, page_number, (y1 + y2) / 2)
+
+        # Build layout hint for the VLM
+        hint_lines: list[str] = []
+        if layout_elements:
+            for i, element in enumerate(layout_elements, 1):
+                hint_lines.append(f"[{i}] ({element.type.value}) y={element.y1:.0f}–{element.y2:.0f}")
+        hint_lines.append("Important: Figures, charts and images have been blanked out (white rectangles).")
+        hint_lines.append("For each white rectangle, insert '![brief description in Persian](#)' at its position in the text.")
+        hint_lines.append("Do NOT describe the content of white rectangles in prose — just place the image marker.")
+        layout_hint = "Page layout detected:\n" + "\n".join(hint_lines)
+
+        page_text = await self._extract_element(cleaned, layout_hint)
 
         if page_text:
             page_text = _postprocess_output(page_text)

@@ -1,0 +1,337 @@
+"""Layout Detection — ensemble PP-DocLayoutV2+V3 with padding crop."""
+
+from __future__ import annotations
+
+import logging
+import os
+import tempfile
+import time
+from dataclasses import dataclass, field
+from enum import StrEnum
+from pathlib import Path
+
+from PIL import Image
+
+logger = logging.getLogger(__name__)
+
+
+class LayoutType(StrEnum):
+    title = "title"
+    heading = "heading"
+    header = "header"
+    footer = "footer"
+    paragraph = "paragraph"
+    list = "list"
+    table = "table"
+    table_caption = "table_caption"
+    table_footnote = "table_footnote"
+    figure = "figure"
+    figure_caption = "figure_caption"
+    chart = "chart"
+    formula = "formula"
+    code = "code"
+    reference = "reference"
+    page_number = "page_number"
+    unknown = "unknown"
+
+
+TEXT_TYPES = {
+    LayoutType.title,
+    LayoutType.heading,
+    LayoutType.header,
+    LayoutType.footer,
+    LayoutType.paragraph,
+    LayoutType.list,
+    LayoutType.reference,
+}
+VISUAL_TYPES = {LayoutType.figure, LayoutType.chart}
+TABLE_TYPES = {LayoutType.table, LayoutType.table_caption, LayoutType.table_footnote}
+SPECIAL_TYPES = {LayoutType.formula, LayoutType.code}
+
+
+@dataclass
+class LayoutElement:
+    id: str
+    page_id: str
+    page_number: int
+    type: LayoutType
+    bbox: tuple[float, float, float, float]  # x1, y1, x2, y2 (raw)
+    padded_bbox: tuple[float, float, float, float]  # with 10% padding
+    confidence: float
+    crop_path: str | None = None
+
+
+# ── Label mapping for PP-DocLayout models ───────────────────────────────────
+LABEL_MAP: dict[str, LayoutType] = {
+    "title": LayoutType.title,
+    "doc_title": LayoutType.title,
+    "section_heading": LayoutType.heading,
+    "paragraph_title": LayoutType.heading,
+    "heading": LayoutType.heading,
+    "paragraph": LayoutType.paragraph,
+    "text": LayoutType.paragraph,
+    "plain_text": LayoutType.paragraph,
+    "abstract": LayoutType.paragraph,
+    "reference": LayoutType.reference,
+    "reference_content": LayoutType.reference,
+    "list": LayoutType.list,
+    "table": LayoutType.table,
+    "table_caption": LayoutType.table_caption,
+    "table_footnote": LayoutType.table_footnote,
+    "figure": LayoutType.figure,
+    "chart": LayoutType.chart,
+    "image": LayoutType.figure,
+    "picture": LayoutType.figure,
+    "formula": LayoutType.formula,
+    "equation": LayoutType.formula,
+    "display_formula": LayoutType.formula,
+    "inline_formula": LayoutType.formula,
+    "isolate_formula": LayoutType.formula,
+    "caption": LayoutType.figure_caption,
+    "figure_title": LayoutType.figure_caption,
+    "figure_caption": LayoutType.figure_caption,
+    "formula_caption": LayoutType.figure_caption,
+    "formula_number": LayoutType.page_number,
+    "vision_footnote": LayoutType.table_footnote,
+    "header": LayoutType.header,
+    "header_image": LayoutType.header,
+    "footer": LayoutType.footer,
+    "footer_image": LayoutType.footer,
+    "page_number": LayoutType.page_number,
+    "number": LayoutType.page_number,
+    "footnote": LayoutType.footer,
+    "aside_text": LayoutType.paragraph,
+    "vertical_text": LayoutType.paragraph,
+    "algorithm": LayoutType.code,
+    "code": LayoutType.code,
+    "seal": LayoutType.figure,
+    "content": LayoutType.paragraph,
+    "phonetic": LayoutType.paragraph,
+    "abandon": LayoutType.unknown,
+}
+
+MODEL_NAMES = ["PP-DocLayoutV2", "PP-DocLayoutV3"]
+CROP_PADDING_RATIO = 0.10
+
+
+def _iou(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> float:
+    x_left = max(a[0], b[0])
+    y_top = max(a[1], b[1])
+    x_right = min(a[2], b[2])
+    y_bottom = min(a[3], b[3])
+    if x_right <= x_left or y_bottom <= y_top:
+        return 0.0
+    intersection = (x_right - x_left) * (y_bottom - y_top)
+    area_a = max(0.0, (a[2] - a[0]) * (a[3] - a[1]))
+    area_b = max(0.0, (b[2] - b[0]) * (b[3] - b[1]))
+    union = area_a + area_b - intersection
+    if union <= 0:
+        return 0.0
+    return float(intersection) / float(union)
+
+
+def deduplicate_by_iou(
+    elements: list[LayoutElement], iou_threshold: float = 0.40
+) -> list[LayoutElement]:
+    if len(elements) <= 1:
+        return elements
+    sorted_elems = sorted(
+        elements,
+        key=lambda e: -((e.bbox[2] - e.bbox[0]) * (e.bbox[3] - e.bbox[1])),
+    )
+    kept: list[LayoutElement] = []
+    for elem in sorted_elems:
+        is_dup = any(
+            _iou(elem.bbox, k.bbox) >= iou_threshold for k in kept
+        )
+        if not is_dup:
+            kept.append(elem)
+    return kept
+
+
+def _pad_bbox(
+    bbox: tuple[float, float, float, float], img_w: int, img_h: int
+) -> tuple[float, float, float, float]:
+    x1, y1, x2, y2 = bbox
+    w = max(1.0, x2 - x1)
+    h = max(1.0, y2 - y1)
+    pad_x = w * CROP_PADDING_RATIO
+    pad_y = h * CROP_PADDING_RATIO
+    return (
+        max(0, x1 - pad_x),
+        max(0, y1 - pad_y),
+        min(img_w, x2 + pad_x),
+        min(img_h, y2 + pad_y),
+    )
+
+
+class LayoutDetector:
+    """Dual-model ensemble layout detector with crop generation."""
+
+    def __init__(self, confidence_threshold: float = 0.5) -> None:
+        self.confidence_threshold = confidence_threshold
+        self._models: dict[str, object] = {}
+
+        self.stats: dict[str, list[float]] = {
+            "detect_time": [],
+            "elements_per_page": [],
+        }
+
+    def detect_page(
+        self, image: Image.Image, page: "Page"
+    ) -> list[LayoutElement]:
+        """Run detection and return layout elements with crops."""
+        import sys
+
+        boxes_v2 = self._run_model(image, page, MODEL_NAMES[0])
+        boxes_v3 = self._run_model(image, page, MODEL_NAMES[1])
+
+        all_elems = boxes_v2 + boxes_v3
+        all_elems = deduplicate_by_iou(all_elems, iou_threshold=0.40)
+
+        self.stats["elements_per_page"].append(len(all_elems))
+        logger.debug(
+            "Page %d: v2=%d, v3=%d, total=%d",
+            page.page_number, len(boxes_v2), len(boxes_v3), len(all_elems),
+        )
+
+        for elem in all_elems:
+            crop = image.crop(
+                (int(elem.padded_bbox[0]), int(elem.padded_bbox[1]),
+                 int(elem.padded_bbox[2]), int(elem.padded_bbox[3]))
+            )
+            crop_dir = Path(f"/tmp/crops/{elem.page_id}")
+            crop_dir.mkdir(parents=True, exist_ok=True)
+            crop_path = crop_dir / f"{elem.id}.png"
+            crop.save(crop_path, "PNG")
+            elem.crop_path = str(crop_path)
+
+        return all_elems
+
+    def detect(self, image: Image.Image, page: "Page") -> list[LayoutElement]:
+        """Public API — detect elements on a single page."""
+        return self.detect_page(image, page)
+
+    def _run_model(
+        self, image: Image.Image, page: "Page", model_name: str
+    ) -> list[LayoutElement]:
+        """Run a single layout model on a page image."""
+        model = self._get_model(model_name)
+        if model is None:
+            return []
+
+        t0 = time.time()
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                image.save(tmp, format="PNG")
+                temp_path = tmp.name
+
+            result = next(iter(model.predict(temp_path)), None)
+            if result is None:
+                return []
+
+            payload = getattr(result, "json", None)
+            if callable(payload):
+                payload = payload()
+            elements = self._parse_output(
+                payload, page, model_name
+            )
+            self.stats["detect_time"].append(time.time() - t0)
+            return elements
+        except Exception:
+            logger.debug("%s failed for page %d", model_name, page.page_number, exc_info=True)
+            return []
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+
+    def _get_model(self, model_name: str):
+        """Lazy-init and cache layout models."""
+        if model_name in self._models:
+            return self._models[model_name]
+        try:
+            from paddleocr import LayoutDetection
+
+            model = LayoutDetection(
+                model_name=model_name,
+                engine_config={"enable_mkldnn": False, "cpu_threads": 2},
+            )
+            self._models[model_name] = model
+            return model
+        except ImportError:
+            raise RuntimeError("paddleocr required for layout detection")
+
+    def _parse_output(
+        self, result: object, page: "Page", source: str
+    ) -> list[LayoutElement]:
+        """Convert model JSON output to LayoutElement list."""
+        if not isinstance(result, dict):
+            return []
+        values = result.get("res")
+        if isinstance(values, dict):
+            result = values
+        items = (
+            result.get("parsing_res_list")
+            or result.get("boxes")
+            or result.get("layout")
+            or []
+        )
+        if not isinstance(items, list):
+            return []
+
+        elements: list[LayoutElement] = []
+        for i, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            raw_label = (
+                item.get("block_label") or item.get("type") or item.get("label") or ""
+            )
+            elem_type = LABEL_MAP.get(str(raw_label), LayoutType.unknown)
+            bbox_raw = item.get("block_bbox") or item.get("bbox") or item.get("coordinate")
+            if isinstance(bbox_raw, (list, tuple)) and len(bbox_raw) == 4:
+                x1, y1, x2, y2 = bbox_raw
+            elif isinstance(bbox_raw, dict):
+                x1 = float(bbox_raw.get("x1", 0))
+                y1 = float(bbox_raw.get("y1", 0))
+                x2 = float(bbox_raw.get("x2", 0))
+                y2 = float(bbox_raw.get("y2", 0))
+            else:
+                continue
+
+            confidence = float(item.get("confidence", item.get("score", 0.5)))
+            if confidence < self.confidence_threshold:
+                continue
+            bbox = (float(x1), float(y1), float(x2), float(y2))
+            padded = _pad_bbox(bbox, page.width, page.height)
+            elem_id = f"{page.id}_e{i + 1:04d}"
+
+            elements.append(
+                LayoutElement(
+                    id=elem_id,
+                    page_id=page.id,
+                    page_number=page.page_number,
+                    type=elem_type,
+                    bbox=bbox,
+                    padded_bbox=padded,
+                    confidence=confidence,
+                )
+            )
+        return elements
+
+    def log_stats(self) -> None:
+        if self.stats["detect_time"]:
+            logger.info(
+                "Layout: avg=%.2fs, total elements=%d",
+                sum(self.stats["detect_time"]) / len(self.stats["detect_time"]),
+                sum(self.stats["elements_per_page"]),
+            )
+
+
+def load_layout_detector(confidence_threshold: float = 0.5) -> LayoutDetector:
+    return LayoutDetector(confidence_threshold=confidence_threshold)

@@ -175,7 +175,15 @@ async def _process_with_pipeline(
             page_images = render_pdf_bytes(file_content, dpi=150)
         file_content.seek(0)
         pdf_data = file_content.read() if file_type == "application/pdf" else None
-        docx_buf = build_docx(result, page_images, pdf_data=pdf_data)
+        docx_buf = build_docx(
+            result,
+            page_images=page_images,
+            elements=pipeline.get_elements(),
+            page_headers=pipeline.get_headers(),
+            page_footers=pipeline.get_footers(),
+            crops=pipeline.get_all_crops(),
+            pdf_data=pdf_data,
+        )
         docx_buf.seek(0)
         docx_url = await upload_file(docx_buf)
     except Exception:

@@ -54,6 +54,9 @@ class Settings(config.Settings):
         os.getenv("OCR_PIPELINE_ENABLE_PREPROCESSING", "true").lower() == "true"
     )
     ocr_vlm_model: str = os.getenv("OCR_VLM_MODEL", "google/gemini-3.1-flash-lite")
+    ocr_layout_confidence_threshold: float = float(
+        os.getenv("OCR_LAYOUT_CONFIDENCE_THRESHOLD", "0.5")
+    )
     paddle_pipeline_name: str = os.getenv("PADDLE_PIPELINE_NAME", "PaddleOCR-VL-1.5")
     paddle_device: str = os.getenv("PADDLE_DEVICE", "cpu")
 

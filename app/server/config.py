@@ -45,7 +45,15 @@ class Settings(config.Settings):
     title_model: str = os.getenv("OPENROUTER_TITLE_MODEL", "google/gemma-2-9b-it:free")
     soniox_api_key: str | None = os.getenv("SONIOX_API_KEY")
 
-    ocr_engine: str = os.getenv("OCR_ENGINE", "llm")
+    ocr_engine: str = os.getenv("OCR_ENGINE", "pipeline")
+    ocr_pipeline_dpi: int = int(os.getenv("OCR_PIPELINE_DPI", "300"))
+    ocr_pipeline_enable_layout: bool = (
+        os.getenv("OCR_PIPELINE_ENABLE_LAYOUT", "true").lower() == "true"
+    )
+    ocr_pipeline_enable_preprocessing: bool = (
+        os.getenv("OCR_PIPELINE_ENABLE_PREPROCESSING", "true").lower() == "true"
+    )
+    ocr_vlm_model: str = os.getenv("OCR_VLM_MODEL", "google/gemini-3.1-flash-lite")
     paddle_pipeline_name: str = os.getenv("PADDLE_PIPELINE_NAME", "PaddleOCR-VL-1.5")
     paddle_device: str = os.getenv("PADDLE_DEVICE", "cpu")
 

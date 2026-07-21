@@ -21,6 +21,7 @@ class OcrEngineType(StrEnum):
     llm = "llm"
     paddle = "paddle"
     paddleocr_vl_1_5 = "paddleocr_vl_1_5"
+    pipeline = "pipeline"
 
 
 class OcrTaskSchemaCreate(TaskCreateFieldsMixin):
@@ -36,7 +37,7 @@ class OcrTaskSchemaCreate(TaskCreateFieldsMixin):
     ocr_engine: OcrEngineType | None = Field(
         None,
         description=(
-            "OCR engine: llm (default) or paddleocr_vl_1_5. "
+            "OCR engine: pipeline (default), llm, or paddleocr_vl_1_5. "
             "When omitted, server default is used."
         ),
     )

@@ -1,5 +1,5 @@
 name: transcribe_cleanup
-model: openai/gpt-4o-mini
+model: claude/sonnet-4.5
 temperature: 0.3
 system: |
   You are a transcription editor. You receive raw speech-to-text output which may contain:

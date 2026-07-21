@@ -1,6 +1,7 @@
 """OCR task processing services."""
 
 import logging
+from io import BytesIO
 
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
@@ -23,15 +24,17 @@ from .schemas import OcrEngineType
 
 def _resolve_ocr_engine(task: OcrTask) -> OcrEngineType:
     """Resolve the OCR engine type from task configuration."""
-    engine = (task.ocr_engine or Settings.ocr_engine or "llm").lower().strip()
+    engine = (task.ocr_engine or Settings.ocr_engine or "pipeline").lower().strip()
     aliases = {
         "paddle": "paddleocr_vl_1_5",
         "paddleocr": "paddleocr_vl_1_5",
         "paddleocr_v1.5": "paddleocr_vl_1_5",
         "paddleocr_vl_1_5": "paddleocr_vl_1_5",
         "paddleocr-vl-1.5": "paddleocr_vl_1_5",
+        "modern": "pipeline",
+        "layout": "pipeline",
     }
-    return OcrEngineType(aliases.get(engine, "llm"))
+    return OcrEngineType(aliases.get(engine, engine))
 
 
 async def process_ocr(task: OcrTask) -> OcrTask:
@@ -49,7 +52,13 @@ async def process_ocr(task: OcrTask) -> OcrTask:
             result = process_direct_file(file_content, file_type)
             return await save_result(task, result)
 
-        # OCR processing (PDF, images)
+        engine = _resolve_ocr_engine(task)
+
+        # Modern pipeline engine: layout detection + structured extraction
+        if engine == OcrEngineType.pipeline:
+            return await _process_with_pipeline(task, file_content, file_type, engine)
+
+        # Legacy engines (LLM, Paddle)
         pages = prepare_pages(file_content, file_type)
         if not pages:
             return await save_error(
@@ -64,14 +73,11 @@ async def process_ocr(task: OcrTask) -> OcrTask:
             logging.error("Insufficient quota for task %s", task.uid)
             return await save_error(task, "insufficient_quota")
 
-        # Process pages with OCR
-        engine = _resolve_ocr_engine(task)
         if engine in (OcrEngineType.paddle, OcrEngineType.paddleocr_vl_1_5):
             text_pages = await process_pages_with_paddle(pages)
         else:
             text_pages = await process_pages_batch(pages, max_concurrent=10)
 
-        # Meter usage
         amount = finance.estimate_ocr_cost(pages=len(pages), engine=engine.value)
         usage = await finance.meter_cost(
             task.user_id,
@@ -83,7 +89,6 @@ async def process_ocr(task: OcrTask) -> OcrTask:
             },
         )
 
-        # Save result
         result = "\n\n".join([t for t in text_pages if t])
         return await save_result(
             task,
@@ -100,6 +105,92 @@ async def process_ocr(task: OcrTask) -> OcrTask:
     except Exception as exc:
         logging.exception("Error processing task %s", task.uid)
         return await save_error(task, f"OCR processing failed: {exc}")
+
+
+async def _process_with_pipeline(
+    task: OcrTask,
+    file_content: BytesIO,
+    file_type: str,
+    engine: OcrEngineType,
+) -> OcrTask:
+    """Process OCR using the modern document pipeline."""
+    from .pipeline.engine import DocumentPipeline
+    from .pipeline.renderer import count_pdf_bytes
+
+    async def ocr_fn(crop_bytes: BytesIO, layout_hint: str = "") -> str:
+        from .ocr_services import ocr_to_text
+
+        return await ocr_to_text(crop_bytes, layout_hint=layout_hint)
+
+    page_count = count_pdf_bytes(file_content) if file_type == "application/pdf" else 1
+    if page_count < 1:
+        return await save_error(task, "Document has no pages")
+    quota = await finance.check_quota(task.user_id, page_count, raise_exception=False)
+    if quota < page_count:
+        return await save_error(task, "insufficient_quota")
+
+    pipeline = DocumentPipeline(
+        dpi=getattr(Settings, "ocr_pipeline_dpi", 300),
+        enable_preprocessing=Settings.ocr_pipeline_enable_preprocessing,
+        enable_layout=Settings.ocr_pipeline_enable_layout,
+        enable_normalization=True,
+        pipeline_ocr_fn=ocr_fn,
+    )
+
+    if file_type == "application/pdf":
+        result = await pipeline.process_pdf(file_content)
+    else:
+        result = await pipeline.process_image_bytes(file_content)
+
+    docx_url: str | None = None
+    try:
+        from .pipeline.docx_renderer import build_docx
+        from .pipeline.renderer import render_pdf_bytes
+        from PIL import Image
+
+        page_images: list[Image.Image] = []
+        if file_type == "application/pdf":
+            file_content.seek(0)
+            page_images = render_pdf_bytes(file_content, dpi=150)
+        file_content.seek(0)
+        pdf_data = file_content.read() if file_type == "application/pdf" else None
+        docx_buf = build_docx(result, page_images, pdf_data=pdf_data)
+        from utils.clients.media import MediaClient
+
+        docx_url = await MediaClient.upload(
+            docx_buf.getvalue(), f"result_{task.uid[:8]}.docx"
+        )
+    except Exception:
+        logger.exception("DOCX generation failed")
+
+    amount = finance.estimate_ocr_cost(pages=page_count, engine=engine.value)
+    usage = await finance.meter_cost(
+        task.user_id,
+        amount,
+        meta_data={
+            "service": "ocr",
+            "engine": engine.value,
+            "pages": page_count,
+        },
+    )
+
+    provider_meta = {
+        "provider": "ocr",
+        "engine": engine.value,
+        "pipeline": "document_pipeline_v1",
+        "model": Settings.ocr_vlm_model,
+        "usage": {"pages": page_count},
+    }
+    if docx_url:
+        provider_meta["docx_url"] = docx_url
+
+    return await save_result(
+        task,
+        result,
+        usage_amount=float(usage.amount) if usage else None,
+        usage_id=usage.uid if usage else None,
+        provider_meta=provider_meta,
+    )
 
 
 async def save_error(task: OcrTask, message: str) -> OcrTask:

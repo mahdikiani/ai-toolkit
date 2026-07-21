@@ -9,9 +9,9 @@ import magic
 from PIL import Image
 
 
-def _b64_image(image: Image.Image) -> str:
+def _b64_image(image: Image.Image, quality: int = 85) -> str:
     with BytesIO() as output:
-        image.save(output, format="jpeg")
+        image.save(output, format="jpeg", quality=quality, optimize=True)
         output.seek(0)
         mime_type = "image/jpeg"
         b64_data = base64.b64encode(output.read()).decode("utf-8")

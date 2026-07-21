@@ -18,6 +18,10 @@ class PrompticCreate(BaseModel):
         default=None,
         description="Callback URL for async notifications",
     )
+    webhook_custom_headers: dict[str, str] | None = Field(
+        default=None,
+        description="Custom headers to send with webhook notifications",
+    )
     idempotency_key: str | None = Field(
         default=None,
         description="Custom idempotency key for deduplication",

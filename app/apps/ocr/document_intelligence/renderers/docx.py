@@ -22,12 +22,39 @@ FONT_LATIN = "Calibri"
 FONT_CS = "B Nazanin"
 FONT_MATH = "Cambria Math"
 
+# Page size/margins fall back to these if the source page dims are missing
+# or implausible (e.g. a non-PDF image source with no natural "page").
+DEFAULT_PAGE_WIDTH_IN = 8.27  # A4
+DEFAULT_PAGE_HEIGHT_IN = 11.69
+MARGIN_RATIO = 0.08
+MIN_MARGIN_IN = 0.4
+MAX_MARGIN_IN = 1.0
 
-def render_docx(ast: DocumentAST) -> BytesIO:
-    """Render full DocumentAST to a .docx BytesIO buffer."""
+# How close a node's bbox center must be to the page center, and how narrow
+# it must be, to be treated as visually centered rather than a right-aligned
+# block that merely doesn't reach the page edge.
+CENTER_TOLERANCE_RATIO = 0.08
+CENTER_MAX_WIDTH_RATIO = 0.7
+
+MIN_IMAGE_WIDTH_IN = 1.5
+
+
+def render_docx(ast: DocumentAST, pdf_data: bytes | None = None) -> BytesIO:
+    """Render full DocumentAST to a .docx BytesIO buffer.
+
+    ``pdf_data`` (the original PDF bytes, when the source was a PDF) is used
+    to detect the document's actual fonts instead of falling back to fixed
+    Calibri/B Nazanin — see ``detect_pdf_fonts`` in the legacy pipeline
+    renderer, reused here rather than reimplemented.
+    """
+    font_cs, font_latin = _resolve_fonts(pdf_data)
+    page_width_in, page_height_in = _resolve_page_size(ast)
+    margin_in = _resolve_margin(page_width_in)
+    content_width_in = max(1.0, page_width_in - 2 * margin_in)
+
     doc = Document()
-    _setup_styles(doc)
-    _setup_default_section(doc)
+    _setup_styles(doc, font_cs, font_latin)
+    _setup_default_section(doc, page_width_in, page_height_in, margin_in)
 
     if ast.title:
         doc.core_properties.title = ast.title
@@ -42,13 +69,43 @@ def render_docx(ast: DocumentAST) -> BytesIO:
     for page in ast.pages:
         if prev_page > 0 and page.page_number > prev_page:
             doc.add_page_break()
-        _render_page(doc, page)
+        _render_page(doc, page, content_width_in)
         prev_page = page.page_number
 
     buf = BytesIO()
     doc.save(buf)
     buf.seek(0)
     return buf
+
+
+def _resolve_fonts(pdf_data: bytes | None) -> tuple[str, str]:
+    """Detect the source PDF's actual fonts; fall back to fixed defaults."""
+    if not pdf_data:
+        return FONT_CS, FONT_LATIN
+    try:
+        from ...pipeline.docx_renderer import detect_pdf_fonts
+
+        detected = detect_pdf_fonts(pdf_data)
+    except Exception:
+        logger.debug("Font detection failed, using defaults", exc_info=True)
+        return FONT_CS, FONT_LATIN
+    return detected.get("cs", FONT_CS), detected.get("latin", FONT_LATIN)
+
+
+def _resolve_page_size(ast: DocumentAST) -> tuple[float, float]:
+    """Physical page size in inches, from the first page's rendered pixel
+    dimensions at its render DPI. Falls back to A4 if unavailable."""
+    for page in ast.pages:
+        if page.page_width > 0 and page.page_height > 0 and page.page_dpi > 0:
+            return (
+                page.page_width / page.page_dpi,
+                page.page_height / page.page_dpi,
+            )
+    return DEFAULT_PAGE_WIDTH_IN, DEFAULT_PAGE_HEIGHT_IN
+
+
+def _resolve_margin(page_width_in: float) -> float:
+    return max(MIN_MARGIN_IN, min(MAX_MARGIN_IN, page_width_in * MARGIN_RATIO))
 
 
 def _collect_header_footer(ast: DocumentAST) -> tuple[str, str]:
@@ -90,7 +147,7 @@ def _set_section_footer(doc: Document, text: str) -> None:
     _ensure_rtl(p)
 
 
-def _setup_styles(doc: Document) -> None:
+def _setup_styles(doc: Document, font_cs: str, font_latin: str) -> None:
     style = doc.styles["Normal"]
     pf = style.paragraph_format
     pf.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -106,10 +163,10 @@ def _setup_styles(doc: Document) -> None:
     if rFonts is None:
         rFonts = _xml("w:rFonts")
         rpr.append(rFonts)
-    rFonts.set(qn("w:ascii"), FONT_LATIN)
-    rFonts.set(qn("w:hAnsi"), FONT_LATIN)
-    rFonts.set(qn("w:cs"), FONT_CS)
-    rFonts.set(qn("w:eastAsia"), FONT_LATIN)
+    rFonts.set(qn("w:ascii"), font_latin)
+    rFonts.set(qn("w:hAnsi"), font_latin)
+    rFonts.set(qn("w:cs"), font_cs)
+    rFonts.set(qn("w:eastAsia"), font_latin)
 
     pPr = style.element.get_or_add_pPr()
     if pPr.find(qn("w:bidi")) is None:
@@ -126,10 +183,10 @@ def _setup_styles(doc: Document) -> None:
         hpf.space_before = Pt(12)
         hpf.space_after = Pt(6)
         hpf.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        _set_bidi_and_fonts(hs)
+        _set_bidi_and_fonts(hs, font_cs, font_latin)
 
 
-def _set_bidi_and_fonts(style) -> None:
+def _set_bidi_and_fonts(style, font_cs: str, font_latin: str) -> None:
     def _xml(tag: str, **attrs: str) -> OxmlElement:
         el = OxmlElement(tag)
         for k, v in attrs.items():
@@ -143,36 +200,40 @@ def _set_bidi_and_fonts(style) -> None:
     if hrFonts is None:
         hrFonts = _xml("w:rFonts")
         hpr.append(hrFonts)
-    hrFonts.set(qn("w:cs"), FONT_CS)
-    hrFonts.set(qn("w:ascii"), FONT_LATIN)
-    hrFonts.set(qn("w:hAnsi"), FONT_LATIN)
+    hrFonts.set(qn("w:cs"), font_cs)
+    hrFonts.set(qn("w:ascii"), font_latin)
+    hrFonts.set(qn("w:hAnsi"), font_latin)
 
 
-def _setup_default_section(doc: Document) -> None:
+def _setup_default_section(
+    doc: Document, page_width_in: float, page_height_in: float, margin_in: float
+) -> None:
     for section in doc.sections:
-        section.top_margin = Inches(0.8)
-        section.bottom_margin = Inches(0.8)
-        section.left_margin = Inches(0.8)
-        section.right_margin = Inches(0.8)
+        section.page_width = Inches(page_width_in)
+        section.page_height = Inches(page_height_in)
+        section.top_margin = Inches(margin_in)
+        section.bottom_margin = Inches(margin_in)
+        section.left_margin = Inches(margin_in)
+        section.right_margin = Inches(margin_in)
 
 
-def _render_page(doc: Document, page: PageAST) -> None:
+def _render_page(doc: Document, page: PageAST, content_width_in: float) -> None:
     for node in page.nodes:
-        _render_node(doc, node)
+        _render_node(doc, node, page.page_width, content_width_in)
 
 
-def _render_node(doc: Document, node) -> None:
+def _render_node(doc: Document, node, page_width_px: float, content_width_in: float) -> None:
     if node.type == LayoutType.title:
-        _add_heading(doc, node.text, 1)
+        _add_heading(doc, node.text, 1, node, page_width_px)
     elif node.type == LayoutType.heading:
-        _add_heading(doc, node.text, min(node.level + 1, 3))
+        _add_heading(doc, node.text, min(node.level + 1, 3), node, page_width_px)
     elif node.type in (LayoutType.header, LayoutType.footer):
         # Promoted to a real Word header/footer section — see _collect_header_footer.
         return
     elif node.type == LayoutType.paragraph:
-        _add_paragraph(doc, node.text)
+        _add_paragraph(doc, node.text, node=node, page_width_px=page_width_px)
     elif node.type == LayoutType.reference:
-        _add_paragraph(doc, f"📎 {node.text}")
+        _add_paragraph(doc, f"📎 {node.text}", node=node, page_width_px=page_width_px)
     elif node.type == LayoutType.list:
         _add_list(doc, node)
     elif node.type == LayoutType.table:
@@ -180,25 +241,44 @@ def _render_node(doc: Document, node) -> None:
     elif node.type == LayoutType.formula:
         _add_formula(doc, node.latex)
     elif node.type == LayoutType.figure:
-        _add_image(doc, node)
+        _add_image(doc, node, page_width_px, content_width_in)
     elif node.type == LayoutType.chart:
-        _add_chart(doc, node)
+        _add_chart(doc, node, page_width_px, content_width_in)
     elif node.type == LayoutType.code:
         _add_code(doc, node)
 
 
-def _add_heading(doc: Document, text: str, level: int) -> None:
+def _resolve_alignment(node, page_width_px: float):
+    """Right-align by default (RTL body text); promote to CENTER when the
+    node's bbox is genuinely centered on the page rather than merely
+    falling short of the page edge (e.g. a centered title/box heading)."""
+    if not page_width_px or node.bbox == (0.0, 0.0, 0.0, 0.0):
+        return WD_ALIGN_PARAGRAPH.RIGHT
+    x1, _, x2, _ = node.bbox
+    width = x2 - x1
+    center_offset = abs((x1 + x2) / 2 - page_width_px / 2)
+    if (
+        width < page_width_px * CENTER_MAX_WIDTH_RATIO
+        and center_offset < page_width_px * CENTER_TOLERANCE_RATIO
+    ):
+        return WD_ALIGN_PARAGRAPH.CENTER
+    return WD_ALIGN_PARAGRAPH.RIGHT
+
+
+def _add_heading(doc: Document, text: str, level: int, node=None, page_width_px: float = 0.0) -> None:
     level = max(1, min(level, 3))
     p = doc.add_heading(text, level=level)
-    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p.alignment = _resolve_alignment(node, page_width_px) if node else WD_ALIGN_PARAGRAPH.RIGHT
     _ensure_rtl(p)
 
 
-def _add_paragraph(doc: Document, text: str, italic: bool = False) -> None:
+def _add_paragraph(
+    doc: Document, text: str, italic: bool = False, node=None, page_width_px: float = 0.0
+) -> None:
     p = doc.add_paragraph()
     run = p.add_run(text or "")
     run.italic = italic
-    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p.alignment = _resolve_alignment(node, page_width_px) if node else WD_ALIGN_PARAGRAPH.RIGHT
     _ensure_rtl(p)
 
 
@@ -250,7 +330,22 @@ def _add_formula(doc: Document, latex: str) -> None:
         run.font.name = FONT_MATH
 
 
-def _add_image(doc: Document, node) -> None:
+def _resolve_image_width_in(node, page_width_px: float, content_width_in: float) -> float:
+    """Size the image relative to how much of the page width its original
+    bbox occupied, instead of always inserting a fixed 5 inches — so a small
+    inline figure doesn't dominate the page and a full-width diagram isn't
+    shrunk down to match everything else."""
+    if not page_width_px or node.bbox == (0.0, 0.0, 0.0, 0.0):
+        return min(5.0, content_width_in)
+    x1, _, x2, _ = node.bbox
+    ratio = max(0.0, min(1.0, (x2 - x1) / page_width_px))
+    width_in = ratio * content_width_in
+    return max(MIN_IMAGE_WIDTH_IN, min(width_in, content_width_in))
+
+
+def _add_image(
+    doc: Document, node, page_width_px: float = 0.0, content_width_in: float = 6.0
+) -> None:
     asset_path = node.asset_path
     if not asset_path or not Path(asset_path).exists():
         _add_paragraph(doc, f"[تصویر: {node.caption}]", italic=True)
@@ -258,10 +353,11 @@ def _add_image(doc: Document, node) -> None:
 
     try:
         img_bytes = Path(asset_path).read_bytes()
+        width_in = _resolve_image_width_in(node, page_width_px, content_width_in)
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = p.add_run()
-        run.add_picture(BytesIO(img_bytes), width=Inches(5.0))
+        run.add_picture(BytesIO(img_bytes), width=Inches(width_in))
         if node.caption:
             cap = doc.add_paragraph()
             cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -271,9 +367,11 @@ def _add_image(doc: Document, node) -> None:
         _add_paragraph(doc, f"[تصویر: {node.caption}]", italic=True)
 
 
-def _add_chart(doc: Document, node) -> None:
+def _add_chart(
+    doc: Document, node, page_width_px: float = 0.0, content_width_in: float = 6.0
+) -> None:
     """Render chart — image + caption + optional data table."""
-    _add_image(doc, node)
+    _add_image(doc, node, page_width_px, content_width_in)
     if node.caption:
         _add_paragraph(doc, node.caption, italic=True)
     if node.description:

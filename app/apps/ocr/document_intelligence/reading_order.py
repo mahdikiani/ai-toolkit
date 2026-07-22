@@ -19,6 +19,9 @@ FULL_WIDTH_TYPES = {
 }
 
 RTL_RATIO_THRESHOLD = 0.3
+FULL_WIDTH_MIN_RATIO = 0.85
+FULL_WIDTH_TYPE_MIN_RATIO = 0.5
+COLUMN_GAP_MIN_RATIO = 0.35
 
 
 class ReadingOrderResolver:
@@ -95,20 +98,37 @@ class ReadingOrderResolver:
     def _detect_full_width(
         elements: list[LayoutElement], page_width: float
     ) -> list[LayoutElement]:
+        """An element is full-width if it's actually wide, or wide *enough*
+        for its type to plausibly span the page. Type alone is not enough:
+        a narrow heading sitting inside a side-by-side box next to another
+        box must NOT be forced full-width, or it gets sorted purely by y
+        and loses its real column position (e.g. it jumps ahead of a
+        right-hand-side box it should read after in RTL)."""
         return [
             e
             for e in elements
-            if (e.bbox[2] - e.bbox[0]) >= page_width * 0.85
-            or e.type in FULL_WIDTH_TYPES
+            if (e.bbox[2] - e.bbox[0]) >= page_width * FULL_WIDTH_MIN_RATIO
+            or (
+                e.type in FULL_WIDTH_TYPES
+                and (e.bbox[2] - e.bbox[0]) >= page_width * FULL_WIDTH_TYPE_MIN_RATIO
+            )
         ]
 
     @staticmethod
     def _detect_columns(elements: list[LayoutElement]) -> list[list[LayoutElement]]:
         if len(elements) < 3:
             return []
-        centers = [(e.bbox[0] + e.bbox[2]) / 2 for e in elements]
-        span = max(centers) - min(centers)
+        centers = sorted((e.bbox[0] + e.bbox[2]) / 2 for e in elements)
+        span = centers[-1] - centers[0]
         if span < 100:
+            return []
+        # KMeans with a fixed n_clusters always returns that many clusters,
+        # even for an essentially single-column page with one stray element
+        # pulling the spread up — fabricating false columns there scrambles
+        # reading order. Only proceed if there's a genuinely large gap
+        # separating groups of x-centers (real columns), not just noise.
+        gaps = [b - a for a, b in zip(centers, centers[1:])]
+        if max(gaps) < span * COLUMN_GAP_MIN_RATIO:
             return []
         try:
             from sklearn.cluster import KMeans

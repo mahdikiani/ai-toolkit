@@ -153,7 +153,7 @@ class DocumentIntelligencePipeline:
 
         t_render = time.time()
         markdown = render_markdown(document_ast)
-        docx_buf = render_docx(document_ast)
+        docx_buf = render_docx(document_ast, pdf_data=document.pdf_data)
         render_time = time.time() - t_render
 
         docx_bytes = docx_buf.getvalue()
@@ -192,7 +192,9 @@ class DocumentIntelligencePipeline:
 
         texts = {p.id: p.text for p in processed if p.text}
         ordered = self.reading_order.resolve(list(layout_elements), page.width, texts=texts)
-        page_ast = build_ast(processed, ordered, page.page_number)
+        page_ast = build_ast(
+            processed, ordered, page.page_number, page.width, page.height, page.dpi
+        )
 
         elem_stats = [
             {

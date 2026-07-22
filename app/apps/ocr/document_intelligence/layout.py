@@ -116,7 +116,7 @@ MODEL_NAMES = ["PP-DocLayoutV2", "PP-DocLayoutV3"]
 CROP_PADDING_RATIO = 0.10  # fallback default; LayoutDetector reads Settings instead
 
 
-def _iou(
+def _intersection_area(
     a: tuple[float, float, float, float], b: tuple[float, float, float, float]
 ) -> float:
     x_left = max(a[0], b[0])
@@ -125,17 +125,43 @@ def _iou(
     y_bottom = min(a[3], b[3])
     if x_right <= x_left or y_bottom <= y_top:
         return 0.0
-    intersection = (x_right - x_left) * (y_bottom - y_top)
-    area_a = max(0.0, (a[2] - a[0]) * (a[3] - a[1]))
-    area_b = max(0.0, (b[2] - b[0]) * (b[3] - b[1]))
-    union = area_a + area_b - intersection
+    return (x_right - x_left) * (y_bottom - y_top)
+
+
+def _box_area(box: tuple[float, float, float, float]) -> float:
+    return max(0.0, (box[2] - box[0])) * max(0.0, (box[3] - box[1]))
+
+
+def _iou(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> float:
+    intersection = _intersection_area(a, b)
+    union = _box_area(a) + _box_area(b) - intersection
     if union <= 0:
         return 0.0
     return float(intersection) / float(union)
 
 
+def _containment_ratio(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> float:
+    """Intersection area over the smaller box's area.
+
+    Catches near-duplicate detections from the v2/v3 ensemble where one
+    model's box is offset/padded differently from the other's — such pairs
+    can have low IOU while one box is still almost entirely inside the
+    other (plain IOU alone misses these and leaves duplicated text).
+    """
+    smaller_area = min(_box_area(a), _box_area(b))
+    if smaller_area <= 0:
+        return 0.0
+    return _intersection_area(a, b) / smaller_area
+
+
 def deduplicate_by_iou(
-    elements: list[LayoutElement], iou_threshold: float = 0.40
+    elements: list[LayoutElement],
+    iou_threshold: float = 0.40,
+    containment_threshold: float = 0.70,
 ) -> list[LayoutElement]:
     if len(elements) <= 1:
         return elements
@@ -146,7 +172,9 @@ def deduplicate_by_iou(
     kept: list[LayoutElement] = []
     for elem in sorted_elems:
         is_dup = any(
-            _iou(elem.bbox, k.bbox) >= iou_threshold for k in kept
+            _iou(elem.bbox, k.bbox) >= iou_threshold
+            or _containment_ratio(elem.bbox, k.bbox) >= containment_threshold
+            for k in kept
         )
         if not is_dup:
             kept.append(elem)

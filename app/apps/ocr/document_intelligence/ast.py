@@ -23,12 +23,19 @@ class ASTNode:
     level: int = 0  # for headings
     rows: list[list[str]] = field(default_factory=list)
     confidence: float = 0.0
+    bbox: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
 
 
 @dataclass
 class PageAST:
     page_number: int
     nodes: list[ASTNode]
+    # Pixel dimensions at the DPI the page was rendered at (same coordinate
+    # space as ASTNode.bbox / LayoutElement.bbox, so ratios between the two
+    # are unit-consistent). Divide by page_dpi to get inches for page setup.
+    page_width: float = 0.0
+    page_height: float = 0.0
+    page_dpi: float = 300.0
 
 
 @dataclass
@@ -42,6 +49,9 @@ def build_ast(
     processed: list[ProcessedElement],
     ordered: list[LayoutElement],
     page_number: int,
+    page_width: float = 0.0,
+    page_height: float = 0.0,
+    page_dpi: float = 300.0,
 ) -> PageAST:
     """Convert processed elements + reading order to a PageAST."""
     order_map = {e.id: i for i, e in enumerate(ordered)}
@@ -61,6 +71,7 @@ def build_ast(
             page_number=elem.page_number,
             level=_heading_level(elem.type),
             confidence=elem.confidence,
+            bbox=elem.bbox,
         )
 
         if elem.type == LayoutType.table and elem.html:
@@ -71,7 +82,13 @@ def build_ast(
 
         nodes.append(node)
 
-    return PageAST(page_number=page_number, nodes=nodes)
+    return PageAST(
+        page_number=page_number,
+        nodes=nodes,
+        page_width=page_width,
+        page_height=page_height,
+        page_dpi=page_dpi,
+    )
 
 
 def build_document_ast(

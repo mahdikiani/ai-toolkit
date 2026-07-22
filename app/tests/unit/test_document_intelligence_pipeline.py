@@ -97,7 +97,11 @@ class TestDocumentIntelligencePipeline:
         result = await self._run()
 
         doc = WordDocument(BytesIO(result.docx_bytes))
-        assert len(doc.tables) == 1
+        # The absolute-layout renderer places each element in its own
+        # floating text box, so tables live inside w:txbxContent rather
+        # than as direct document body children — doc.tables (which only
+        # walks top-level body tables) won't see them; check the raw XML.
+        assert "<w:tbl>" in doc.element.xml
         assert "oMath" in doc.element.xml
 
     async def test_saves_visual_element_as_asset(self) -> None:

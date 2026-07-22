@@ -28,7 +28,7 @@ from .elements import ElementProcessor, ProcessedElement
 from .layout import VISUAL_TYPES, LayoutDetector, LayoutElement, LayoutType
 from .loader import Document, Page, load_document
 from .reading_order import ReadingOrderResolver
-from .renderers.docx import render_docx
+from .renderers.docx_absolute import render_docx_absolute
 from .renderers.markdown import render_markdown
 
 logger = logging.getLogger(__name__)
@@ -153,7 +153,7 @@ class DocumentIntelligencePipeline:
 
         t_render = time.time()
         markdown = render_markdown(document_ast)
-        docx_buf = render_docx(document_ast, pdf_data=document.pdf_data)
+        docx_buf = render_docx_absolute(document_ast, pdf_data=document.pdf_data)
         render_time = time.time() - t_render
 
         docx_bytes = docx_buf.getvalue()

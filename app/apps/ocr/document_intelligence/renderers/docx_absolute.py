@@ -257,10 +257,17 @@ def _paragraph_xml(
     if font_cs or font_latin:
         rfonts = f'<w:rFonts w:ascii="{font_latin}" w:hAnsi="{font_latin}" w:cs="{font_cs}"/>'
     bold_xml = "<w:b/><w:bCs/>" if bold else ""
+    # No <w:rtl/> on the run, matching the flow renderer (docx.py), which
+    # never sets it either — only <w:bidi/> on the paragraph. NOTE: tested
+    # both ways via LibreOffice rendering and this alone did NOT fix the
+    # bidi-reordering-on-wrap issue with mixed Persian/English text in a
+    # narrow box (still under investigation — see conversation/plan notes).
+    # Kept anyway since it matches the known-good renderer and cannot make
+    # things worse.
     return (
         '<w:p><w:pPr><w:bidi/><w:jc w:val="right"/></w:pPr>'
         f'<w:r><w:rPr>{rfonts}{bold_xml}<w:sz w:val="{size_pt * 2}"/>'
-        f'<w:szCs w:val="{size_pt * 2}"/><w:rtl/></w:rPr>'
+        f'<w:szCs w:val="{size_pt * 2}"/></w:rPr>'
         f'<w:t xml:space="preserve">{_escape(text)}</w:t></w:r></w:p>'
     )
 
@@ -283,7 +290,7 @@ def _table_xml(node: ASTNode) -> str:
                 '<w:right w:val="single" w:sz="4" w:color="999999"/>'
                 "</w:tcBorders></w:tcPr>"
                 f'<w:p><w:pPr><w:bidi/><w:jc w:val="right"/></w:pPr>'
-                f'<w:r><w:rPr><w:sz w:val="18"/><w:rtl/></w:rPr>'
+                f'<w:r><w:rPr><w:sz w:val="18"/></w:rPr>'
                 f'<w:t xml:space="preserve">{text}</w:t></w:r></w:p></w:tc>'
             )
         rows_xml.append(f'<w:tr>{"".join(cells)}</w:tr>')

@@ -40,7 +40,8 @@ MIN_IMAGE_WIDTH_IN = 1.5
 
 
 def render_docx(ast: DocumentAST, pdf_data: bytes | None = None) -> BytesIO:
-    """Render full DocumentAST to a .docx BytesIO buffer.
+    """
+    Render full DocumentAST to a .docx BytesIO buffer.
 
     ``pdf_data`` (the original PDF bytes, when the source was a PDF) is used
     to detect the document's actual fonts instead of falling back to fixed
@@ -93,7 +94,8 @@ def _resolve_fonts(pdf_data: bytes | None) -> tuple[str, str]:
 
 
 def _resolve_page_size(ast: DocumentAST) -> tuple[float, float]:
-    """Physical page size in inches, from the first page's rendered pixel
+    """
+    Physical page size in inches, from the first page's rendered pixel
     dimensions at its render DPI. Falls back to A4 if unavailable."""
     for page in ast.pages:
         if page.page_width > 0 and page.page_height > 0 and page.page_dpi > 0:
@@ -171,6 +173,8 @@ def _setup_styles(doc: Document, font_cs: str, font_latin: str) -> None:
     pPr = style.element.get_or_add_pPr()
     if pPr.find(qn("w:bidi")) is None:
         pPr.append(_xml("w:bidi"))
+    _set_proof_lang(pPr)
+    _set_proof_lang(rpr)
     sz = rpr.find(qn("w:sz"))
     if sz is None:
         rpr.append(_xml("w:sz", **{"w:val": "22"}))
@@ -196,6 +200,7 @@ def _set_bidi_and_fonts(style, font_cs: str, font_latin: str) -> None:
     hpr = style.element.get_or_add_rPr()
     if hpr.find(qn("w:bidi")) is None:
         hpr.append(_xml("w:bidi"))
+    _set_proof_lang(hpr)
     hrFonts = hpr.find(qn("w:rFonts"))
     if hrFonts is None:
         hrFonts = _xml("w:rFonts")
@@ -249,7 +254,8 @@ def _render_node(doc: Document, node, page_width_px: float, content_width_in: fl
 
 
 def _resolve_alignment(node, page_width_px: float):
-    """Right-align by default (RTL body text); promote to CENTER when the
+    """
+    Right-align by default (RTL body text); promote to CENTER when the
     node's bbox is genuinely centered on the page rather than merely
     falling short of the page edge (e.g. a centered title/box heading)."""
     if not page_width_px or node.bbox == (0.0, 0.0, 0.0, 0.0):
@@ -331,7 +337,8 @@ def _add_formula(doc: Document, latex: str) -> None:
 
 
 def _resolve_image_width_in(node, page_width_px: float, content_width_in: float) -> float:
-    """Size the image relative to how much of the page width its original
+    """
+    Size the image relative to how much of the page width its original
     bbox occupied, instead of always inserting a fixed 5 inches — so a small
     inline figure doesn't dominate the page and a full-width diagram isn't
     shrunk down to match everything else."""
@@ -409,3 +416,23 @@ def _ensure_rtl(p) -> None:
     pPr = p._element.get_or_add_pPr()
     if pPr.find(qn("w:bidi")) is None:
         pPr.append(OxmlElement("w:bidi"))
+    _set_proof_lang(pPr)
+    for run in p.runs:
+        _set_proof_lang(run._element.get_or_add_rPr())
+
+
+def _set_proof_lang(pr) -> None:
+    """
+    Set proofing language to fa-IR/bidi=fa-IR on a pPr or rPr element.
+
+    This — not the run-level <w:rtl/> flag — is what actually fixes mixed
+    Persian/English word-ordering on line wrap: verified word-by-word via
+    PyMuPDF word positions after a LibreOffice render, matching the known-good
+    approach in hawzeh-tts's docx_lang.py.
+    """
+    for old in pr.findall(qn("w:lang")):
+        pr.remove(old)
+    lang = OxmlElement("w:lang")
+    lang.set(qn("w:val"), "fa-IR")
+    lang.set(qn("w:bidi"), "fa-IR")
+    pr.append(lang)

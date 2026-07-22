@@ -1,4 +1,5 @@
-"""Word Renderer — absolute layout, one floating text box per element.
+"""
+Word Renderer — absolute layout, one floating text box per element.
 
 The flow-based renderer (``docx.py``) lays elements out one after another
 like normal typing, which reads fine but bears no visual resemblance to the
@@ -62,7 +63,8 @@ MIN_BOX_HEIGHT_IN = 0.15
 
 
 def render_docx_absolute(ast: DocumentAST, pdf_data: bytes | None = None) -> BytesIO:
-    """Render DocumentAST to .docx with every element absolutely positioned
+    """
+    Render DocumentAST to .docx with every element absolutely positioned
     at its source-page bbox, reconstructing the original page layout."""
     font_cs, font_latin = _resolve_fonts(pdf_data)
     page_width_in, page_height_in = _resolve_page_size(ast)
@@ -105,7 +107,8 @@ def render_docx_absolute(ast: DocumentAST, pdf_data: bytes | None = None) -> Byt
 
 
 def _setup_minimal_style(doc: Document, font_cs: str, font_latin: str) -> None:
-    """Set the document's base font; per-box formatting is applied inline
+    """
+    Set the document's base font; per-box formatting is applied inline
     since each box is independent XML, not a shared paragraph style."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
@@ -219,13 +222,16 @@ def _escape(text: str) -> str:
     return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+_LANG_XML = '<w:lang w:val="fa-IR" w:bidi="fa-IR"/>'
+
 _CHAR_WIDTH_FACTOR = 0.50  # rough avg glyph width ≈ factor * size(pt) / 72in
 _LINE_HEIGHT_FACTOR = 1.25  # rough line height ≈ factor * size(pt) / 72in
 MIN_AUTOFIT_SIZE_PT = 6
 
 
 def _autofit_size_pt(text: str, width_in: float, height_in: float, base_size_pt: int) -> int:
-    """Shrink the font size so wrapped text is more likely to fit inside its
+    """
+    Shrink the font size so wrapped text is more likely to fit inside its
     box height, reducing (not fully eliminating — this is a rough
     proportional-font estimate, not real text layout) overlap with
     neighboring boxes positioned right below/beside it."""
@@ -257,17 +263,17 @@ def _paragraph_xml(
     if font_cs or font_latin:
         rfonts = f'<w:rFonts w:ascii="{font_latin}" w:hAnsi="{font_latin}" w:cs="{font_cs}"/>'
     bold_xml = "<w:b/><w:bCs/>" if bold else ""
-    # No <w:rtl/> on the run, matching the flow renderer (docx.py), which
-    # never sets it either — only <w:bidi/> on the paragraph. NOTE: tested
-    # both ways via LibreOffice rendering and this alone did NOT fix the
-    # bidi-reordering-on-wrap issue with mixed Persian/English text in a
-    # narrow box (still under investigation — see conversation/plan notes).
-    # Kept anyway since it matches the known-good renderer and cannot make
-    # things worse.
+    # No <w:rtl/> on the run — tested both ways via LibreOffice rendering and
+    # it made no visible difference to the bidi-wrap ordering bug. The actual
+    # fix is <w:lang w:val="fa-IR" w:bidi="fa-IR"/> on both pPr and rPr: it
+    # tells the bidi algorithm the paragraph's/run's proofing language is
+    # RTL, which resolves mixed Persian/English word ordering correctly on
+    # wrap (verified word-by-word via PyMuPDF word positions after LibreOffice
+    # render — matches hawzeh-tts's known-good docx_lang.py approach).
     return (
-        '<w:p><w:pPr><w:bidi/><w:jc w:val="right"/></w:pPr>'
+        f'<w:p><w:pPr><w:bidi/><w:jc w:val="right"/>{_LANG_XML}</w:pPr>'
         f'<w:r><w:rPr>{rfonts}{bold_xml}<w:sz w:val="{size_pt * 2}"/>'
-        f'<w:szCs w:val="{size_pt * 2}"/></w:rPr>'
+        f'<w:szCs w:val="{size_pt * 2}"/>{_LANG_XML}</w:rPr>'
         f'<w:t xml:space="preserve">{_escape(text)}</w:t></w:r></w:p>'
     )
 
@@ -289,8 +295,8 @@ def _table_xml(node: ASTNode) -> str:
                 '<w:left w:val="single" w:sz="4" w:color="999999"/>'
                 '<w:right w:val="single" w:sz="4" w:color="999999"/>'
                 "</w:tcBorders></w:tcPr>"
-                f'<w:p><w:pPr><w:bidi/><w:jc w:val="right"/></w:pPr>'
-                f'<w:r><w:rPr><w:sz w:val="18"/></w:rPr>'
+                f'<w:p><w:pPr><w:bidi/><w:jc w:val="right"/>{_LANG_XML}</w:pPr>'
+                f'<w:r><w:rPr><w:sz w:val="18"/>{_LANG_XML}</w:rPr>'
                 f'<w:t xml:space="preserve">{text}</w:t></w:r></w:p></w:tc>'
             )
         rows_xml.append(f'<w:tr>{"".join(cells)}</w:tr>')

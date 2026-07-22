@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Sequence
 
 from .elements import ProcessedElement
-from .layout import LayoutType
+from .layout import LayoutElement, LayoutType
 
 
 @dataclass
@@ -19,7 +18,7 @@ class ASTNode:
     description: str = ""
     chart_data: dict | None = None
     asset_path: str = ""
-    children: list["ASTNode"] = field(default_factory=list)
+    children: list[ASTNode] = field(default_factory=list)
     page_number: int = 1
     level: int = 0  # for headings
     rows: list[list[str]] = field(default_factory=list)
@@ -73,6 +72,21 @@ def build_ast(
         nodes.append(node)
 
     return PageAST(page_number=page_number, nodes=nodes)
+
+
+def build_document_ast(
+    pages: list[PageAST], asset_map: dict[str, str] | None = None
+) -> DocumentAST:
+    """Combine per-page ASTs into a full DocumentAST and pull out a title."""
+    title = ""
+    for page in pages:
+        for node in page.nodes:
+            if node.type == LayoutType.title and node.text.strip():
+                title = node.text.strip()
+                break
+        if title:
+            break
+    return DocumentAST(title=title, pages=pages, assets=dict(asset_map or {}))
 
 
 def _heading_level(t: LayoutType) -> int:

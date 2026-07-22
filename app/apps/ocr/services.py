@@ -1,7 +1,9 @@
 """OCR task processing services."""
 
+import asyncio
 import logging
 from io import BytesIO
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +37,20 @@ def _resolve_ocr_engine(task: OcrTask) -> OcrEngineType:
         "paddleocr-vl-1.5": "paddleocr_vl_1_5",
         "modern": "pipeline",
         "layout": "pipeline",
+        "di": "document_intelligence",
+        "document-intelligence": "document_intelligence",
+        "ast": "document_intelligence",
     }
     return OcrEngineType(aliases.get(engine, engine))
+
+
+_EXTENSION_BY_MIME = {
+    "application/pdf": ".pdf",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/tiff": ".tiff",
+    "image/webp": ".webp",
+}
 
 
 async def process_ocr(task: OcrTask) -> OcrTask:
@@ -59,6 +73,12 @@ async def process_ocr(task: OcrTask) -> OcrTask:
         # Modern pipeline engine: layout detection + structured extraction
         if engine == OcrEngineType.pipeline:
             return await _process_with_pipeline(task, file_content, file_type, engine)
+
+        # Document Intelligence engine: AST-based, real DOCX tables/OMML/headers
+        if engine == OcrEngineType.document_intelligence:
+            return await _process_with_document_intelligence(
+                task, file_content, file_type, engine
+            )
 
         # Legacy engines (LLM, Paddle)
         pages = prepare_pages(file_content, file_type)
@@ -149,10 +169,12 @@ async def _process_with_pipeline(
     docx_url: str | None = None
     uploaded_assets: dict[str, str] = {}
     try:
+        from PIL import Image
+
+        from utils.integrations.media import upload_file
+
         from .pipeline.docx_renderer import build_docx
         from .pipeline.renderer import render_pdf_bytes
-        from PIL import Image
-        from utils.integrations.media import upload_file
 
         assets = pipeline.get_assets()
         for asset in assets:
@@ -213,6 +235,93 @@ async def _process_with_pipeline(
     return await save_result(
         task,
         result,
+        usage_amount=float(usage.amount) if usage else None,
+        usage_id=usage.uid if usage else None,
+        provider_meta=provider_meta,
+    )
+
+
+async def _process_with_document_intelligence(
+    task: OcrTask,
+    file_content: BytesIO,
+    file_type: str,
+    engine: OcrEngineType,
+) -> OcrTask:
+    """
+    Process OCR using the AST-based Document Intelligence pipeline.
+
+    Real per-element extraction (layout -> VLM -> reading order -> AST),
+    rendered into clean Markdown plus a DOCX with real tables, OMML
+    equations, and Word header/footer sections.
+    """
+    import shutil
+
+    from .document_intelligence import DocumentIntelligencePipeline, summarize_stats
+    from .document_intelligence.renderers.markdown import rewrite_asset_links
+    from .pipeline.renderer import count_pdf_bytes
+
+    page_count = count_pdf_bytes(file_content) if file_type == "application/pdf" else 1
+    if page_count < 1:
+        return await save_error(task, "Document has no pages")
+    quota = await finance.check_quota(task.user_id, page_count, raise_exception=False)
+    if quota < page_count:
+        return await save_error(task, "insufficient_quota")
+
+    filename = f"document{_EXTENSION_BY_MIME.get(file_type, '')}"
+    di_pipeline = DocumentIntelligencePipeline()
+    try:
+        result = await di_pipeline.process(file_content, filename)
+    except Exception as exc:
+        di_pipeline.cleanup()
+        shutil.rmtree(di_pipeline.output_dir, ignore_errors=True)
+        logger.exception("Document Intelligence pipeline failed for task %s", task.uid)
+        return await save_error(task, f"Document Intelligence pipeline failed: {exc}")
+    di_pipeline.cleanup()
+
+    markdown = result.markdown
+    docx_url: str | None = None
+    try:
+        from utils.integrations.media import upload_file
+
+        url_map: dict[str, str] = {}
+        for asset in result.assets:
+            try:
+                content = await asyncio.to_thread(Path(asset.path).read_bytes)
+                url = await upload_file(BytesIO(content))
+                if url:
+                    url_map[asset.rel_path] = url
+            except Exception:
+                logger.exception("Failed to upload asset %s", asset.rel_path)
+        if url_map:
+            markdown = rewrite_asset_links(markdown, url_map)
+
+        docx_url = await upload_file(BytesIO(result.docx_bytes))
+    except Exception:
+        logger.exception("Asset/DOCX upload failed for task %s", task.uid)
+    finally:
+        shutil.rmtree(result.output_dir, ignore_errors=True)
+
+    amount = finance.estimate_ocr_cost(pages=page_count, engine=engine.value)
+    usage = await finance.meter_cost(
+        task.user_id,
+        amount,
+        meta_data={"service": "ocr", "engine": engine.value, "pages": page_count},
+    )
+
+    provider_meta = {
+        "provider": "ocr",
+        "engine": engine.value,
+        "pipeline": "document_intelligence_v1",
+        "model": Settings.ocr_vlm_model,
+        "usage": {"pages": page_count},
+        "stats": summarize_stats(result.stats, include_elements=Settings.ocr_di_output_debug),
+    }
+    if docx_url:
+        provider_meta["docx_url"] = docx_url
+
+    return await save_result(
+        task,
+        markdown,
         usage_amount=float(usage.amount) if usage else None,
         usage_id=usage.uid if usage else None,
         provider_meta=provider_meta,

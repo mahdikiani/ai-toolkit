@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Sequence
 
 from PIL import Image
 
@@ -38,9 +37,9 @@ class Document:
 def load_document(source: str | Path | BytesIO, dpi: int = 300) -> Document:
     """Load any supported document type and return a Document with rendered pages."""
     doc_id = str(uuid.uuid4())
-    created = datetime.now(tz=timezone.utc).isoformat()
+    created = datetime.now(tz=UTC).isoformat()
 
-    if isinstance(source, str) or isinstance(source, Path):
+    if isinstance(source, (str, Path)):
         path = Path(source) if isinstance(source, str) else source
         filename = path.name
         raw_bytes = path.read_bytes()
@@ -85,7 +84,6 @@ def load_document(source: str | Path | BytesIO, dpi: int = 300) -> Document:
 
 def _detect_mime(data: bytes, filename: str = "") -> str:
     """Detect MIME type from bytes or filename."""
-    import re
 
     if data[:4] == b"%PDF":
         return "application/pdf"

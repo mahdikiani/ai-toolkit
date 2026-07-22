@@ -22,6 +22,7 @@ class OcrEngineType(StrEnum):
     paddle = "paddle"
     paddleocr_vl_1_5 = "paddleocr_vl_1_5"
     pipeline = "pipeline"
+    document_intelligence = "document_intelligence"
 
 
 class OcrTaskSchemaCreate(TaskCreateFieldsMixin):
@@ -37,8 +38,9 @@ class OcrTaskSchemaCreate(TaskCreateFieldsMixin):
     ocr_engine: OcrEngineType | None = Field(
         None,
         description=(
-            "OCR engine: pipeline (default), llm, or paddleocr_vl_1_5. "
-            "When omitted, server default is used."
+            "OCR engine: pipeline (default), llm, paddleocr_vl_1_5, or "
+            "document_intelligence (AST-based pipeline with real DOCX tables/"
+            "OMML equations/headers-footers). When omitted, server default is used."
         ),
     )
 

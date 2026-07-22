@@ -1,5 +1,5 @@
 """Document Intelligence Pipeline — complete document parsing & reconstruction."""
 
-from .pipeline import DocumentPipeline
+from .pipeline import DocumentIntelligencePipeline, PipelineResult, summarize_stats
 
-__all__ = ["DocumentPipeline"]
+__all__ = ["DocumentIntelligencePipeline", "PipelineResult", "summarize_stats"]

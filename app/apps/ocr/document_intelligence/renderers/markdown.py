@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from .ast import DocumentAST, PageAST
-from .layout import LayoutType
+from ..ast import DocumentAST
+from ..layout import LayoutType
 
 
 def render_markdown(ast: DocumentAST) -> str:
-    """Convert DocumentAST to clean Markdown string."""
+    """
+    Convert DocumentAST to clean Markdown string.
+
+    ``ast.title`` is not re-rendered here: the title element already appears
+    in its natural reading-order position within ``ast.pages`` (as a ``# ``
+    heading). It is used instead for document metadata (see renderers/docx.py).
+    """
     lines: list[str] = []
     for i, page in enumerate(ast.pages):
         if i > 0:
@@ -54,6 +58,18 @@ def _render_node(node, assets: dict[str, str]) -> str | None:
     if node.type == LayoutType.code:
         return f"```\n{node.text}\n```"
     return node.text or None
+
+
+def rewrite_asset_links(markdown: str, url_map: dict[str, str]) -> str:
+    """
+    Replace local asset paths in rendered Markdown with public URLs.
+
+    ``url_map`` maps the local relative path (e.g. ``assets/image_001.png``,
+    as produced by AssetManager) to a publicly reachable URL after upload.
+    """
+    for local_path, url in url_map.items():
+        markdown = markdown.replace(f"]({local_path})", f"]({url})")
+    return markdown
 
 
 def _render_table(node) -> str:

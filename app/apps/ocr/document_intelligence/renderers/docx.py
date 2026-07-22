@@ -5,16 +5,16 @@ from __future__ import annotations
 import logging
 from io import BytesIO
 from pathlib import Path
-from xml.etree import ElementTree as ET
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement, qn
-from docx.oxml.ns import nsdecls
-from docx.shared import Inches, Pt, RGBColor, Emu
+from docx.oxml import OxmlElement, parse_xml
+from docx.oxml.ns import nsdecls, qn
+from docx.shared import Inches, Pt, RGBColor
 
-from .ast import DocumentAST, PageAST
-from .layout import LayoutType
+from ..ast import DocumentAST, PageAST
+from ..latex_omml import LatexConversionError, latex_to_omml
+from ..layout import LayoutType
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,15 @@ def render_docx(ast: DocumentAST) -> BytesIO:
     _setup_styles(doc)
     _setup_default_section(doc)
 
+    if ast.title:
+        doc.core_properties.title = ast.title
+
+    header_text, footer_text = _collect_header_footer(ast)
+    if header_text:
+        _set_section_header(doc, header_text)
+    if footer_text:
+        _set_section_footer(doc, footer_text)
+
     prev_page = 0
     for page in ast.pages:
         if prev_page > 0 and page.page_number > prev_page:
@@ -40,6 +49,45 @@ def render_docx(ast: DocumentAST) -> BytesIO:
     doc.save(buf)
     buf.seek(0)
     return buf
+
+
+def _collect_header_footer(ast: DocumentAST) -> tuple[str, str]:
+    """Pick the most common header/footer text across pages (a repeating banner)."""
+    from collections import Counter
+
+    headers = [
+        node.text.strip()
+        for page in ast.pages
+        for node in page.nodes
+        if node.type == LayoutType.header and node.text.strip()
+    ]
+    footers = [
+        node.text.strip()
+        for page in ast.pages
+        for node in page.nodes
+        if node.type == LayoutType.footer and node.text.strip()
+    ]
+    header = Counter(headers).most_common(1)[0][0] if headers else ""
+    footer = Counter(footers).most_common(1)[0][0] if footers else ""
+    return header, footer
+
+
+def _set_section_header(doc: Document, text: str) -> None:
+    section = doc.sections[0]
+    section.header.is_linked_to_previous = False
+    p = section.header.paragraphs[0] if section.header.paragraphs else section.header.add_paragraph()
+    p.text = text
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _ensure_rtl(p)
+
+
+def _set_section_footer(doc: Document, text: str) -> None:
+    section = doc.sections[0]
+    section.footer.is_linked_to_previous = False
+    p = section.footer.paragraphs[0] if section.footer.paragraphs else section.footer.add_paragraph()
+    p.text = text
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _ensure_rtl(p)
 
 
 def _setup_styles(doc: Document) -> None:
@@ -119,7 +167,8 @@ def _render_node(doc: Document, node) -> None:
     elif node.type == LayoutType.heading:
         _add_heading(doc, node.text, min(node.level + 1, 3))
     elif node.type in (LayoutType.header, LayoutType.footer):
-        _add_paragraph(doc, node.text, italic=True)
+        # Promoted to a real Word header/footer section — see _collect_header_footer.
+        return
     elif node.type == LayoutType.paragraph:
         _add_paragraph(doc, node.text)
     elif node.type == LayoutType.reference:
@@ -156,7 +205,7 @@ def _add_paragraph(doc: Document, text: str, italic: bool = False) -> None:
 def _add_list(doc: Document, node) -> None:
     for child in node.children:
         p = doc.add_paragraph(style="List Bullet")
-        run = p.add_run(child.text or "")
+        p.add_run(child.text or "")
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
 
@@ -179,29 +228,26 @@ def _add_table(doc: Document, node) -> None:
 
 
 def _add_formula(doc: Document, latex: str) -> None:
-    """Add formula as proper OMML (Office Math) equation."""
+    """
+    Add formula as a real, editable OMML (Office Math) Word equation.
+
+    LaTeX is parsed and re-emitted as genuine ``m:oMath`` XML (see
+    ../latex_omml.py) so Word treats it as an equation object, not text. If
+    the LaTeX can't be parsed, fall back to styled math-font text instead of
+    failing the whole document.
+    """
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    # OMML-based equation
-    oMathPara = OxmlElement("m:oMathPara")
-    oMathPara.set(qn("m:xmlns:m"), "http://schemas.openxmlformats.org/officeDocument/2006/math")
-    oMath = OxmlElement("m:oMath")
-    oMathPara.append(oMath)
-
-    # Add LaTeX as text run inside equation
-    r = OxmlElement("m:r")
-    rPr = OxmlElement("m:rPr")
-    rStyle = OxmlElement("m:sty")
-    rStyle.set(qn("m:val"), "p")
-    rPr.append(rStyle)
-    r.append(rPr)
-    t = OxmlElement("m:t")
-    t.text = latex
-    r.append(t)
-    oMath.append(r)
-
-    p._element.append(oMathPara)
+    try:
+        omath_xml = latex_to_omml(latex)
+        oMathPara = parse_xml(f'<m:oMathPara {nsdecls("m")}>{omath_xml}</m:oMathPara>')
+        p._p.append(oMathPara)
+    except LatexConversionError:
+        logger.warning("Formula LaTeX->OMML conversion failed, using text fallback: %r", latex)
+        run = p.add_run(latex)
+        run.italic = True
+        run.font.name = FONT_MATH
 
 
 def _add_image(doc: Document, node) -> None:

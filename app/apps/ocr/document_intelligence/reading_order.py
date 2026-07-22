@@ -18,15 +18,30 @@ FULL_WIDTH_TYPES = {
     LayoutType.footer,
 }
 
+RTL_RATIO_THRESHOLD = 0.3
+
 
 class ReadingOrderResolver:
     """Resolve element order: detect columns → sort RTL → interleave full-width."""
 
     def resolve(
-        self, elements: list[LayoutElement], page_width: float, is_rtl: bool = True
+        self,
+        elements: list[LayoutElement],
+        page_width: float,
+        is_rtl: bool | None = None,
+        texts: dict[str, str] | None = None,
     ) -> list[LayoutElement]:
+        """
+        Order elements for reading. If ``is_rtl`` is omitted, it is
+        auto-detected from ``texts`` (element_id -> extracted text) via
+        script-range language detection, defaulting to RTL when no text is
+        available yet (this pipeline targets Persian/Arabic documents).
+        """
         if not elements:
             return elements
+
+        if is_rtl is None:
+            is_rtl = self.detect_is_rtl(elements, texts)
 
         full_width = self._detect_full_width(elements, page_width)
         column_candidates = [e for e in elements if e not in full_width]
@@ -63,6 +78,20 @@ class ReadingOrderResolver:
         return elements
 
     @staticmethod
+    def detect_is_rtl(
+        elements: list[LayoutElement], texts: dict[str, str] | None
+    ) -> bool:
+        """Auto-detect page direction from extracted text's script ratio."""
+        if not texts:
+            return True
+        from ..pipeline.normalization import detect_rtl_ratio
+
+        combined = " ".join(texts.get(e.id, "") for e in elements).strip()
+        if not combined:
+            return True
+        return detect_rtl_ratio(combined) >= RTL_RATIO_THRESHOLD
+
+    @staticmethod
     def _detect_full_width(
         elements: list[LayoutElement], page_width: float
     ) -> list[LayoutElement]:
@@ -90,7 +119,7 @@ class ReadingOrderResolver:
             )
             labels = kmeans.fit_predict(x_centers)
             cols: dict[int, list[LayoutElement]] = {}
-            for elem, label in zip(elements, labels):
+            for elem, label in zip(elements, labels, strict=True):
                 cols.setdefault(int(label), []).append(elem)
             return list(cols.values())
         except Exception:

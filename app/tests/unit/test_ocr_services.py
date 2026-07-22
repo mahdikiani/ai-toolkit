@@ -142,6 +142,17 @@ class TestResolveOcrEngine:
 
         assert result == OcrEngineType.llm
 
+    def test_returns_document_intelligence_for_di_alias(self) -> None:
+        """_resolve_ocr_engine should resolve 'di' alias to document_intelligence."""
+        task = MagicMock()
+        task.ocr_engine = "di"
+
+        with patch("apps.ocr.services.Settings") as mock_settings:
+            mock_settings.ocr_engine = "pipeline"
+            result = _resolve_ocr_engine(task)
+
+        assert result == OcrEngineType.document_intelligence
+
 
 @pytest.mark.unit
 class TestSaveError:

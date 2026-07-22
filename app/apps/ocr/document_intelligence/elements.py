@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from functools import cache
 from io import BytesIO
 from pathlib import Path
-from typing import Any
 
 from PIL import Image
 
@@ -21,15 +21,26 @@ TEXT_TYPES = {
     LayoutType.reference, LayoutType.figure_caption,
 }
 
+_PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+
+
+@cache
+def _read_prompt(name: str) -> str:
+    """Read a VLM system prompt from prompts/<name>.prompt."""
+    return (_PROMPTS_DIR / f"{name}.prompt").read_text().strip()
+
 
 @dataclass
 class ProcessedElement:
-    id: str
-    page_id: str
-    page_number: int
-    type: LayoutType
-    bbox: tuple[float, float, float, float]
-    confidence: float
+    # All fields default so handlers can build a ProcessedElement with only
+    # the content fields set; process() fills id/page_id/.../confidence in
+    # from the source LayoutElement right after the handler returns.
+    id: str = ""
+    page_id: str = ""
+    page_number: int = 0
+    type: LayoutType = LayoutType.unknown
+    bbox: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    confidence: float = 0.0
 
     text: str = ""
     html: str = ""  # for tables: HTML representation
@@ -49,12 +60,19 @@ class ElementProcessor:
 
     def __init__(
         self,
-        vlm_model: str = "google/gemini-3.1-flash-lite",
+        vlm_model: str | None = None,
         openrouter_client=None,
+        max_concurrent: int = 5,
     ):
+        if vlm_model is None:
+            from server.config import Settings
+
+            vlm_model = Settings.ocr_vlm_model
         self.vlm_model = vlm_model
         self.client = openrouter_client
+        self.max_concurrent = max_concurrent
         self.stats: list[dict] = []
+        self._last_tokens = 0
 
     async def process(
         self, elem: LayoutElement, page_image: Image.Image
@@ -81,6 +99,8 @@ class ElementProcessor:
             result = await self._process_text(crop_image, elem)
 
         result.vlm_duration = time.time() - t0
+        result.vlm_model = self.vlm_model
+        result.vlm_tokens = self._last_tokens
         result.id = elem.id
         result.page_id = elem.page_id
         result.page_number = elem.page_number
@@ -91,7 +111,9 @@ class ElementProcessor:
         self.stats.append({
             "id": elem.id,
             "type": elem.type.value,
+            "confidence": elem.confidence,
             "duration": result.vlm_duration,
+            "tokens": result.vlm_tokens,
             "model": self.vlm_model,
         })
         return result
@@ -130,7 +152,7 @@ class ElementProcessor:
                 body["response_format"] = response_format
             data = await self.client.complete_chat_json(body)
             content = data["choices"][0]["message"]["content"].strip()
-            self.stats[-1]["tokens"] = data.get("usage", {}).get("total_tokens", 0)
+            self._last_tokens = data.get("usage", {}).get("total_tokens", 0)
             return content
 
         from utils.integrations.openrouter import complete_chat_json
@@ -156,12 +178,13 @@ class ElementProcessor:
             body["response_format"] = response_format
         data = await complete_chat_json(body)
         content = data["choices"][0]["message"]["content"].strip()
+        self._last_tokens = data.get("usage", {}).get("total_tokens", 0)
         return content
 
     async def _process_text(
         self, crop: Image.Image, elem: LayoutElement
     ) -> ProcessedElement:
-        sp = "You are an OCR engine. Extract ALL text from this image exactly as written. Preserve original language. Use LaTeX for math. Return ONLY the extracted text."
+        sp = _read_prompt("text")
         up = f"Extract the {elem.type.value} text from this crop."
         text = await self._vlm_call(crop, sp, up, max_tokens=2048)
         return ProcessedElement(text=text)
@@ -169,7 +192,7 @@ class ElementProcessor:
     async def _process_table(
         self, crop: Image.Image, elem: LayoutElement
     ) -> ProcessedElement:
-        sp = "You are a table extraction engine. Extract the table preserving ALL rows and columns exactly. Return HTML <table> format."
+        sp = _read_prompt("table")
         up = "Extract this table. Return as HTML <table> with <tr> and <td> tags."
         html = await self._vlm_call(crop, sp, up, max_tokens=4096)
         return ProcessedElement(text=html, html=html)
@@ -177,7 +200,7 @@ class ElementProcessor:
     async def _process_formula(
         self, crop: Image.Image, elem: LayoutElement
     ) -> ProcessedElement:
-        sp = "You extract mathematical formulas. Return ONLY the LaTeX code. No explanations."
+        sp = _read_prompt("formula")
         up = "Extract the formula as LaTeX."
         latex = await self._vlm_call(crop, sp, up, max_tokens=1024)
         latex = latex.strip("`").strip().strip("$$").strip()
@@ -186,7 +209,7 @@ class ElementProcessor:
     async def _process_figure(
         self, crop: Image.Image, elem: LayoutElement
     ) -> ProcessedElement:
-        sp = "You describe images in documents. Provide: caption and description."
+        sp = _read_prompt("figure")
         up = "Describe this image. Format: caption: ...\\ndescription: ..."
         desc = await self._vlm_call(crop, sp, up, max_tokens=512)
         caption, description = desc, desc
@@ -200,8 +223,7 @@ class ElementProcessor:
     async def _process_chart(
         self, crop: Image.Image, elem: LayoutElement
     ) -> ProcessedElement:
-        sp = """You extract chart information. Return JSON:
-{"chart_type": "...", "title": "...", "description": "...", "data": [...]}"""
+        sp = _read_prompt("chart")
         up = "Extract this chart's information as JSON."
         import json as _json
         try:
@@ -224,7 +246,7 @@ class ElementProcessor:
     async def _process_code(
         self, crop: Image.Image, elem: LayoutElement
     ) -> ProcessedElement:
-        sp = "Extract code blocks exactly. Preserve indentation. Detect language."
+        sp = _read_prompt("code")
         up = "Extract the code from this image."
         text = await self._vlm_call(crop, sp, up, max_tokens=2048)
         return ProcessedElement(text=text)

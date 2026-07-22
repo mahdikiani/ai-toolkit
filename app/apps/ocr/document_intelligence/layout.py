@@ -6,11 +6,13 @@ import logging
 import os
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
 from PIL import Image
+
+from .loader import Page
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +113,7 @@ LABEL_MAP: dict[str, LayoutType] = {
 }
 
 MODEL_NAMES = ["PP-DocLayoutV2", "PP-DocLayoutV3"]
-CROP_PADDING_RATIO = 0.10
+CROP_PADDING_RATIO = 0.10  # fallback default; LayoutDetector reads Settings instead
 
 
 def _iou(
@@ -152,13 +154,16 @@ def deduplicate_by_iou(
 
 
 def _pad_bbox(
-    bbox: tuple[float, float, float, float], img_w: int, img_h: int
+    bbox: tuple[float, float, float, float],
+    img_w: int,
+    img_h: int,
+    padding_ratio: float = CROP_PADDING_RATIO,
 ) -> tuple[float, float, float, float]:
     x1, y1, x2, y2 = bbox
     w = max(1.0, x2 - x1)
     h = max(1.0, y2 - y1)
-    pad_x = w * CROP_PADDING_RATIO
-    pad_y = h * CROP_PADDING_RATIO
+    pad_x = w * padding_ratio
+    pad_y = h * padding_ratio
     return (
         max(0, x1 - pad_x),
         max(0, y1 - pad_y),
@@ -170,8 +175,19 @@ def _pad_bbox(
 class LayoutDetector:
     """Dual-model ensemble layout detector with crop generation."""
 
-    def __init__(self, confidence_threshold: float = 0.5) -> None:
+    def __init__(
+        self,
+        confidence_threshold: float = 0.5,
+        padding_ratio: float = CROP_PADDING_RATIO,
+        iou_threshold: float = 0.40,
+        crop_dir: str | Path | None = None,
+    ) -> None:
         self.confidence_threshold = confidence_threshold
+        self.padding_ratio = padding_ratio
+        self.iou_threshold = iou_threshold
+        # Per-instance temp dir (defaults to a fresh mkdtemp) so concurrent tasks
+        # never collide on crop paths and can be cleaned up as a unit.
+        self.crop_dir = Path(crop_dir) if crop_dir else Path(tempfile.mkdtemp(prefix="di_crops_"))
         self._models: dict[str, object] = {}
 
         self.stats: dict[str, list[float]] = {
@@ -180,16 +196,14 @@ class LayoutDetector:
         }
 
     def detect_page(
-        self, image: Image.Image, page: "Page"
+        self, image: Image.Image, page: Page
     ) -> list[LayoutElement]:
         """Run detection and return layout elements with crops."""
-        import sys
-
         boxes_v2 = self._run_model(image, page, MODEL_NAMES[0])
         boxes_v3 = self._run_model(image, page, MODEL_NAMES[1])
 
         all_elems = boxes_v2 + boxes_v3
-        all_elems = deduplicate_by_iou(all_elems, iou_threshold=0.40)
+        all_elems = deduplicate_by_iou(all_elems, iou_threshold=self.iou_threshold)
 
         self.stats["elements_per_page"].append(len(all_elems))
         logger.debug(
@@ -202,20 +216,20 @@ class LayoutDetector:
                 (int(elem.padded_bbox[0]), int(elem.padded_bbox[1]),
                  int(elem.padded_bbox[2]), int(elem.padded_bbox[3]))
             )
-            crop_dir = Path(f"/tmp/crops/{elem.page_id}")
-            crop_dir.mkdir(parents=True, exist_ok=True)
-            crop_path = crop_dir / f"{elem.id}.png"
+            page_crop_dir = self.crop_dir / elem.page_id
+            page_crop_dir.mkdir(parents=True, exist_ok=True)
+            crop_path = page_crop_dir / f"{elem.id}.png"
             crop.save(crop_path, "PNG")
             elem.crop_path = str(crop_path)
 
         return all_elems
 
-    def detect(self, image: Image.Image, page: "Page") -> list[LayoutElement]:
+    def detect(self, image: Image.Image, page: Page) -> list[LayoutElement]:
         """Public API — detect elements on a single page."""
         return self.detect_page(image, page)
 
     def _run_model(
-        self, image: Image.Image, page: "Page", model_name: str
+        self, image: Image.Image, page: Page, model_name: str
     ) -> list[LayoutElement]:
         """Run a single layout model on a page image."""
         model = self._get_model(model_name)
@@ -264,11 +278,11 @@ class LayoutDetector:
             )
             self._models[model_name] = model
             return model
-        except ImportError:
-            raise RuntimeError("paddleocr required for layout detection")
+        except ImportError as exc:
+            raise RuntimeError("paddleocr required for layout detection") from exc
 
     def _parse_output(
-        self, result: object, page: "Page", source: str
+        self, result: object, page: Page, source: str
     ) -> list[LayoutElement]:
         """Convert model JSON output to LayoutElement list."""
         if not isinstance(result, dict):
@@ -308,7 +322,7 @@ class LayoutDetector:
             if confidence < self.confidence_threshold:
                 continue
             bbox = (float(x1), float(y1), float(x2), float(y2))
-            padded = _pad_bbox(bbox, page.width, page.height)
+            padded = _pad_bbox(bbox, page.width, page.height, self.padding_ratio)
             elem_id = f"{page.id}_e{i + 1:04d}"
 
             elements.append(
@@ -331,6 +345,12 @@ class LayoutDetector:
                 sum(self.stats["detect_time"]) / len(self.stats["detect_time"]),
                 sum(self.stats["elements_per_page"]),
             )
+
+    def cleanup(self) -> None:
+        """Remove this detector's temp crop directory."""
+        import shutil
+
+        shutil.rmtree(self.crop_dir, ignore_errors=True)
 
 
 def load_layout_detector(confidence_threshold: float = 0.5) -> LayoutDetector:

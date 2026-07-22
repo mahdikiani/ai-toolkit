@@ -60,6 +60,15 @@ class Settings(config.Settings):
     paddle_pipeline_name: str = os.getenv("PADDLE_PIPELINE_NAME", "PaddleOCR-VL-1.5")
     paddle_device: str = os.getenv("PADDLE_DEVICE", "cpu")
 
+    ocr_di_crop_padding_ratio: float = float(
+        os.getenv("OCR_DI_CROP_PADDING_RATIO", "0.10")
+    )
+    ocr_di_iou_threshold: float = float(os.getenv("OCR_DI_IOU_THRESHOLD", "0.40"))
+    ocr_di_max_concurrent_vlm: int = int(os.getenv("OCR_DI_MAX_CONCURRENT_VLM", "5"))
+    ocr_di_output_debug: bool = (
+        os.getenv("OCR_DI_OUTPUT_DEBUG", "false").lower() == "true"
+    )
+
     minutes_price: float = float(os.getenv("MINUTES_PRICE", 1))
     pricing: ClassVar[dict] = json.loads(os.getenv("AI_TOOLKIT_PRICING", "{}"))
 

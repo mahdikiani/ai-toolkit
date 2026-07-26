@@ -11,7 +11,7 @@ from apps.ocr.document_intelligence.latex_omml import (
 )
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestLatexToOmml:
     def test_empty_latex_raises(self) -> None:
         with pytest.raises(LatexConversionError):
@@ -36,12 +36,18 @@ class TestLatexToOmml:
 
     @pytest.mark.parametrize(
         "tex",
-        [r"\frac{x^2}{y}", "E=mc^2", r"\sum_{i=1}^n x_i", r"\sqrt{a_i}", r"\int_0^1 x dx"],
+        [
+            r"\frac{x^2}{y}",
+            "E=mc^2",
+            r"\sum_{i=1}^n x_i",
+            r"\sqrt{a_i}",
+            r"\int_0^1 x dx",
+        ],
     )
     def test_round_trips_through_a_real_docx(self, tex: str) -> None:
         """The produced XML must be valid enough for python-docx to embed and re-save."""
         omath = latex_to_omml(tex)
-        xml_str = f'<m:oMathPara {nsdecls("m")}>{omath}</m:oMathPara>'
+        xml_str = f"<m:oMathPara {nsdecls('m')}>{omath}</m:oMathPara>"
         element = parse_xml(xml_str)
 
         doc = Document()

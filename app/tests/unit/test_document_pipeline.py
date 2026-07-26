@@ -22,10 +22,10 @@ class TestDocumentPipeline:
             LayoutBox("first", 1, ElementType.title, 0, 0, 100, 20),
             LayoutBox("second", 1, ElementType.paragraph, 0, 25, 100, 50),
         ]
-        captured_hints: list[str] = []
+        captured_hints: list[object] = []
 
-        async def ocr_fn(image: object, layout_hint: str = "") -> str:
-            captured_hints.append(layout_hint)
+        async def ocr_fn(image: object, element: object | None = None) -> str:
+            captured_hints.append(element)
             return "extracted page text"
 
         pipeline = DocumentPipeline(
@@ -38,10 +38,11 @@ class TestDocumentPipeline:
 
         result = await pipeline.process_image(Image.new("RGB", (100, 60)))
 
-        assert result == "extracted page text"
-        assert len(captured_hints) == 1
-        assert "title" in captured_hints[0]
-        assert "paragraph" in captured_hints[0]
+        assert "# extracted page text" in result
+        assert "extracted page text" in result
+        assert len(captured_hints) == 2
+        assert captured_hints[0] is not None
+        assert captured_hints[1] is not None
 
 
 @pytest.mark.unit
@@ -75,7 +76,7 @@ class TestVisionOcr:
             new_callable=AsyncMock,
             return_value=response,
         ) as complete:
-            result = await ocr_to_text(image_bytes, layout_hint="[1] (paragraph) y=0–50")
+            result = await ocr_to_text(image_bytes, block_type="paragraph")
 
         assert result == "متن"
         assert complete.await_args.args[0]["model"] == "google/gemini-3.1-flash-lite"

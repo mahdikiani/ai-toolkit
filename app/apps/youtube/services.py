@@ -68,9 +68,7 @@ async def process_youtube(task: YoutubeTranscriptTask) -> YoutubeTranscriptTask:
         return task
 
     text_parts = [
-        item.get("text", "")
-        for track in tracks
-        for item in track.get("transcript", [])
+        item.get("text", "") for track in tracks for item in track.get("transcript", [])
     ]
 
     amount = finance.estimate_youtube_cost()

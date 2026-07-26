@@ -1,12 +1,12 @@
 """YouTube transcription task model."""
 
-from fastapi_mongo_base.models import UserOwnedEntity
+from fastapi_mongo_base.models import TenantUserEntity
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
 from .schemas import YoutubeTranscriptTaskSchema
 
 
-class YoutubeTranscriptTask(UserOwnedEntity, YoutubeTranscriptTaskSchema):
+class YoutubeTranscriptTask(TenantUserEntity, YoutubeTranscriptTaskSchema):
     """YouTube transcription task entity."""
 
     async def start_processing(self) -> "YoutubeTranscriptTask":

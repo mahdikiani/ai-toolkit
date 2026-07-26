@@ -1,12 +1,12 @@
 """OCR task model definition."""
 
-from fastapi_mongo_base.models import UserOwnedEntity
+from fastapi_mongo_base.models import TenantUserEntity
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
 from .schemas import OcrTaskSchema
 
 
-class OcrTask(UserOwnedEntity, OcrTaskSchema):
+class OcrTask(TenantUserEntity, OcrTaskSchema):
     """OCR task entity for processing document text extraction."""
 
     async def start_processing(self) -> "OcrTask":

@@ -44,6 +44,7 @@ async def init_db(mongo_client: AsyncIOMotorClient[dict[str, object]]) -> None:
         **kwargs: object,
     ) -> list[str]:
         """Compatibility wrapper for older mongomock_motor versions."""
+        del comment  # mongomock_motor does not accept this kwarg
         filter_value = kwargs.pop("filter", None)
         filter_data = (
             {key: value for key, value in filter_value.items() if isinstance(key, str)}
@@ -52,9 +53,12 @@ async def init_db(mongo_client: AsyncIOMotorClient[dict[str, object]]) -> None:
         )
         kwargs.pop("authorizedCollections", None)
         kwargs.pop("nameOnly", None)
-        return await original_list_collection_names(
-            session=session, filter=filter_data, comment=comment, **kwargs
-        )
+        call_kwargs: dict[str, object] = {}
+        if session is not None:
+            call_kwargs["session"] = session
+        if filter_data is not None:
+            call_kwargs["filter"] = filter_data
+        return await original_list_collection_names(**call_kwargs)
 
     database.list_collection_names: Callable[..., Awaitable[list[str]]] = (
         list_collection_names

@@ -44,6 +44,12 @@ class Settings(config.Settings):
     default_model: str = os.getenv("DEFAULT_MODEL", "openai/gpt-4o-mini")
     title_model: str = os.getenv("OPENROUTER_TITLE_MODEL", "google/gemma-2-9b-it:free")
     soniox_api_key: str | None = os.getenv("SONIOX_API_KEY")
+    soniox_webhook_secret: str | None = os.getenv("SONIOX_WEBHOOK_SECRET")
+    openai_compat_models: str = os.getenv("OPENAI_COMPAT_MODELS", "")
+    openai_stream_max_bytes: int = int(
+        os.getenv("OPENAI_STREAM_MAX_BYTES", str(8 * 1024 * 1024))
+    )
+    default_tts_model: str = os.getenv("DEFAULT_TTS_MODEL", "openai/gpt-4o-mini-tts")
 
     ocr_engine: str = os.getenv("OCR_ENGINE", "pipeline")
     ocr_pipeline_dpi: int = int(os.getenv("OCR_PIPELINE_DPI", "300"))

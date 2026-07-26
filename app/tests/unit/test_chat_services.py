@@ -80,35 +80,41 @@ class TestCompletionProxyServices:
 
     async def test_proxy_adds_default_model_and_meters_success(self) -> None:
         """Verify successful proxying uses the default model and meters usage."""
-        mock_response = MagicMock()
-        mock_response.content = b'{"choices": [], "model": "openai/gpt-4o-mini"}'
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.status_code = 200
+        mock_json_response = MagicMock()
+        mock_json_response.status_code = 200
+        mock_json_response.json.return_value = {
+            "choices": [{"message": {"content": "hi"}}],
+            "model": "openai/gpt-4o-mini",
+            "usage": {"total_tokens": 10},
+        }
 
         with (
             patch.object(
                 completion_services.Settings, "default_model", "default/model"
             ),
             patch(
-                "apps.language.completion.services.openrouter_client.post_chat_completion_unchecked",
+                "apps.openai_compat.services.post_chat_completion_unchecked",
                 new_callable=AsyncMock,
-                return_value=mock_response,
+                return_value=mock_json_response,
             ) as post_mock,
             patch(
-                "apps.language.completion.services.meter_completion_response",
+                "apps.openai_compat.services.finance.check_quota",
                 new_callable=AsyncMock,
-            ) as meter_mock,
+            ),
+            patch(
+                "apps.openai_compat.services.finance.meter_cost",
+                new_callable=AsyncMock,
+            ),
         ):
             content, ctype, status = await completion_services.proxy_chat_completions(
                 {"messages": []},
                 user_id="user-1",
             )
 
-        assert content == mock_response.content
         assert ctype == "application/json"
         assert status == 200
         assert post_mock.await_args.args[0]["model"] == "default/model"
-        meter_mock.assert_awaited_once_with(mock_response.content, user_id="user-1")
+        assert b"chatcmpl-" in content
 
     async def test_meter_completion_response_records_usage(self) -> None:
         """Verify metering records usage from a completion response."""
@@ -144,15 +150,26 @@ class TestCompletionProxyServices:
         async def mock_stream(payload: dict[str, object]) -> AsyncIterator[bytes]:
             assert payload["model"] == "default/model"
             await asyncio.sleep(0)
-            yield b"data: chunk\n\n"
+            yield (
+                b'data: {"choices": [{"delta": {"content": "chunk"}}], '
+                b'"model": "default/model"}\n\n'
+            )
 
         with (
             patch.object(
                 completion_services.Settings, "default_model", "default/model"
             ),
             patch(
-                "apps.language.completion.services.openrouter_client.stream_chat_completion_bytes",
+                "apps.openai_compat.services.stream_chat_completion_bytes",
                 side_effect=mock_stream,
+            ),
+            patch(
+                "apps.openai_compat.services.finance.check_quota",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "apps.openai_compat.services.finance.meter_cost",
+                new_callable=AsyncMock,
             ),
         ):
             stream = completion_services.proxy_chat_completions_raw_stream({
@@ -160,30 +177,46 @@ class TestCompletionProxyServices:
             })
             chunks = [chunk async for chunk in stream]
 
-        assert chunks == [b"data: chunk\n\n"]
+        joined = b"".join(chunks)
+        assert b"default/model" in joined
+        assert b"[DONE]" in joined
+        assert b"chunk" in joined
 
     async def test_stream_maps_openrouter_error(self) -> None:
-        """Verify streamed OpenRouter errors map to API errors."""
+        """Verify streamed OpenRouter errors are emitted as SSE error chunks."""
+
+        from utils.integrations.openrouter import OpenRouterError
 
         async def failing_stream(payload: dict[str, object]) -> AsyncIterator[bytes]:
             await asyncio.sleep(0)
-            raise completion_services.openrouter_client.OpenRouterError(429, "limited")
+            raise OpenRouterError(429, "limited")
             yield  # pragma: no cover
 
         with (
             patch(
-                "apps.language.completion.services.openrouter_client.stream_chat_completion_bytes",
-                return_value=failing_stream({}),
+                "apps.openai_compat.services.stream_chat_completion_bytes",
+                side_effect=failing_stream,
             ),
-            pytest.raises(BaseHTTPException) as exc_info,
+            patch(
+                "apps.openai_compat.services.finance.check_quota",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "apps.openai_compat.services.finance.meter_cost",
+                new_callable=AsyncMock,
+            ),
         ):
-            async for _ in completion_services.proxy_chat_completions_raw_stream({
-                "model": "m"
-            }):
-                pass
+            chunks = [
+                chunk
+                async for chunk in completion_services.proxy_chat_completions_raw_stream(
+                    {"model": "m", "messages": []}
+                )
+            ]
 
-        assert isinstance(exc_info.value, BaseHTTPException)
-        assert exc_info.value.status_code == 429
+        joined = b"".join(chunks)
+        assert b"upstream_error" in joined
+        assert b"limited" in joined
+        assert b"[DONE]" in joined
 
 
 @pytest.mark.unit

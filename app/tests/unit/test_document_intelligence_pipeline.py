@@ -1,4 +1,5 @@
-"""Unit tests for the Document Intelligence orchestrator (full pipeline wiring).
+"""
+Unit tests for the Document Intelligence orchestrator (full pipeline wiring).
 
 Layout detection (PaddleOCR models) and the VLM HTTP call are mocked out —
 this exercises the wiring between Loader -> Layout -> Elements -> Reading
@@ -15,14 +16,17 @@ from PIL import Image
 from apps.ocr.document_intelligence.layout import LayoutElement, LayoutType
 from apps.ocr.document_intelligence.pipeline import (
     DocumentIntelligencePipeline,
+    PipelineResult,
     summarize_stats,
 )
 
 
 def _fake_detect_page(_self, image: Image.Image, page) -> list[LayoutElement]:
-    w, h = image.size
+    w, _h = image.size
 
-    def elem(suffix: str, elem_type: LayoutType, box: tuple[int, int, int, int]) -> LayoutElement:
+    def elem(
+        suffix: str, elem_type: LayoutType, box: tuple[int, int, int, int]
+    ) -> LayoutElement:
         return LayoutElement(
             id=f"{page.id}_{suffix}",
             page_id=page.id,
@@ -43,7 +47,12 @@ def _fake_detect_page(_self, image: Image.Image, page) -> list[LayoutElement]:
 
 
 async def _fake_vlm_call(
-    _self, _crop, system_prompt: str, _user_prompt: str, response_format=None, max_tokens: int = 1024
+    _self,
+    _crop,
+    system_prompt: str,
+    _user_prompt: str,
+    response_format=None,
+    max_tokens: int = 1024,
 ) -> str:
     _self._last_tokens = 7
     if "table extraction engine" in system_prompt:
@@ -63,11 +72,11 @@ def _blank_image(width: int = 600, height: int = 800) -> BytesIO:
     return buf
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestDocumentIntelligencePipeline:
     """End-to-end wiring test with layout/VLM mocked."""
 
-    async def _run(self) -> "PipelineResult":  # noqa: F821 - forward ref for readability
+    async def _run(self) -> PipelineResult:
         with (
             patch(
                 "apps.ocr.document_intelligence.layout.LayoutDetector.detect_page",

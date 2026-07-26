@@ -1,12 +1,12 @@
 """Transcribe task model definition."""
 
-from fastapi_mongo_base.models import UserOwnedEntity
+from fastapi_mongo_base.models import TenantUserEntity
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
 from .schemas import TranscribeTaskSchema
 
 
-class TranscribeTask(UserOwnedEntity, TranscribeTaskSchema):
+class TranscribeTask(TenantUserEntity, TranscribeTaskSchema):
     """Transcription task entity for converting audio to text."""
 
     async def start_processing(

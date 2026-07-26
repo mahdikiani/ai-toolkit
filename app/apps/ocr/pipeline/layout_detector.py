@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 
 from PIL import Image
@@ -11,7 +12,17 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 
 
+class PaddleOcrMissingError(RuntimeError):
+    """Raised when the optional paddleocr dependency is not installed."""
+
+    def __init__(self) -> None:
+        """Initialize the instance."""
+        super().__init__("paddleocr is required for document layout detection")
+
+
 class ElementType(StrEnum):
+    """Represent ElementType."""
+
     title = "title"
     section_heading = "section_heading"
     paragraph = "paragraph"
@@ -34,6 +45,8 @@ class ElementType(StrEnum):
 
 @dataclass
 class LayoutBox:
+    """Represent LayoutBox."""
+
     element_id: str
     page_number: int
     type: ElementType
@@ -119,7 +132,8 @@ def _iou(
 def deduplicate_by_iou(
     boxes: list[LayoutBox], iou_threshold: float = 0.40
 ) -> list[LayoutBox]:
-    """Remove duplicate detections where IOU > threshold, keeping the larger box.
+    """
+    Remove duplicate detections where IOU > threshold, keeping the larger box.
 
     Two boxes that overlap significantly (IOU > threshold) are considered
     the same region; the larger one (by area) is kept.
@@ -137,8 +151,7 @@ def deduplicate_by_iou(
     for box in sorted_boxes:
         bbox = (box.x1, box.y1, box.x2, box.y2)
         is_duplicate = any(
-            _iou(bbox, (k.x1, k.y1, k.x2, k.y2)) >= iou_threshold
-            for k in kept
+            _iou(bbox, (k.x1, k.y1, k.x2, k.y2)) >= iou_threshold for k in kept
         )
         if not is_duplicate:
             kept.append(box)
@@ -152,13 +165,15 @@ MODEL_V3 = "PP-DocLayoutV3"
 
 
 class LayoutDetector:
-    """Detect document layout using an ensemble of PP-DocLayoutV2 + V3.
+    """
+    Detect document layout using an ensemble of PP-DocLayoutV2 + V3.
 
     The two models are run independently and their results are merged,
     then deduplicated by IOU (keep larger box when overlap > 40%).
     """
 
     def __init__(self, confidence_threshold: float = 0.6) -> None:
+        """Initialize the instance."""
         self.confidence_threshold = confidence_threshold
         self._model_v2 = None
         self._model_v3 = None
@@ -175,7 +190,9 @@ class LayoutDetector:
         result = deduplicate_by_iou(all_boxes, iou_threshold=0.40)
         logger.debug(
             "Layout: v2=%d, v3=%d, after dedup=%d",
-            len(boxes_v2), len(boxes_v3), len(result),
+            len(boxes_v2),
+            len(boxes_v3),
+            len(result),
         )
         return result
 
@@ -190,16 +207,17 @@ class LayoutDetector:
         if model is None:
             try:
                 from paddleocr import LayoutDetection
+
                 model = LayoutDetection(
                     model_name=model_name,
                     engine_config={"enable_mkldnn": False, "cpu_threads": 2},
                 )
                 setattr(self, cache_attr, model)
             except ImportError as exc:
-                raise RuntimeError("paddleocr is required for document layout detection") from exc
+                raise PaddleOcrMissingError from exc
 
-        import tempfile
         import os
+        import tempfile
 
         temp_path = None
         try:
@@ -213,18 +231,19 @@ class LayoutDetector:
             payload = getattr(result, "json", None)
             if callable(payload):
                 payload = payload()
-            return self._convert_result(
-                payload, page_number, image.width, image.height
-            )
+            return self._convert_result(payload, page_number, image.width, image.height)
         except Exception:
-            logger.debug("%s detection failed for page %d", model_name, page_number, exc_info=True)
+            logger.debug(
+                "%s detection failed for page %d",
+                model_name,
+                page_number,
+                exc_info=True,
+            )
             return []
         finally:
             if temp_path:
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(temp_path)
-                except OSError:
-                    pass
 
     def _convert_result(
         self, result: object, page_number: int, img_w: int, img_h: int

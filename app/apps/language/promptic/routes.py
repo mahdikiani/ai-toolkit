@@ -1,5 +1,6 @@
 """Promptic API routes."""
 
+import hashlib
 from collections.abc import AsyncIterator
 
 from fastapi import BackgroundTasks, Query, Request
@@ -9,6 +10,7 @@ from fastapi_mongo_base.tasks import TaskStatusEnum
 from pydantic import BaseModel
 
 from server.config import Settings
+from utils.auth import authorize_create_on_behalf
 from utils.task_routes import AbstractTaskUSSORouter
 
 from . import services
@@ -63,27 +65,27 @@ class PrompticRouter(AbstractTaskUSSORouter):
     ) -> PrompticTask | StreamingResponse:
         """Create a new promptic run for a prompt."""
         user = await self.get_user(request)
+        await authorize_create_on_behalf(self, request, user, data)
 
         services.check_schemas(prompt_name, data)
-
-        import hashlib
 
         data.input_variables.setdefault("language", "Persian")
 
         item_data = data.model_dump(exclude_none=True)
         item_data.setdefault(
             "idempotency_key",
-            hashlib.sha256(f"{prompt_name}:{data.model_dump_json()}".encode()).hexdigest(),
+            hashlib.sha256(
+                f"{prompt_name}:{data.model_dump_json()}".encode()
+            ).hexdigest(),
         )
 
         item: PrompticTask = await self.model.create_item({
             **item_data,
             "prompt_name": prompt_name,
-            "user_id": user.uid,
+            "user_id": data.user_id or user.uid,
             "tenant_id": user.tenant_id,
         })
 
-        # For streaming, always process synchronously and return stream
         item.task_status = TaskStatusEnum.processing
         await item.save()
 
@@ -107,5 +109,3 @@ class PrompticRouter(AbstractTaskUSSORouter):
 
 
 router = PrompticRouter().router
-
-ExecutionRouter = PrompticRouter

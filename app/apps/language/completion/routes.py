@@ -1,4 +1,9 @@
-"""OpenAI-compatible completion proxy routes."""
+"""
+OpenAI-compatible completion proxy routes.
+
+Prefer the canonical mounted surface at ``/api/ai/v1/openai/v1/*``.
+This module remains for shared helpers / optional alias mounting.
+"""
 
 import json
 from collections.abc import AsyncIterator
@@ -21,7 +26,7 @@ async def openai_compatible_chat_completions(
     request: Request,
     user: UserData = Depends(auth_dependency),
 ) -> Response:
-    """Proxy an OpenAI-compatible chat completion request to configured providers."""
+    """Proxy an OpenAI-compatible chat completion (alias of openai_compat)."""
     try:
         body = await request.json()
     except json.JSONDecodeError as e:
@@ -38,18 +43,17 @@ async def openai_compatible_chat_completions(
             message={"en": "Body must be a JSON object"},
         )
 
+    user_id = getattr(user, "user_id", None) or getattr(user, "uid", "")
+
     if body.get("stream") is True:
 
         async def passthrough() -> AsyncIterator[bytes]:
-            async for chunk in proxy_chat_completions_raw_stream(body):
+            async for chunk in proxy_chat_completions_raw_stream(body, user_id=user_id):
                 yield chunk
 
         return StreamingResponse(passthrough(), media_type="text/event-stream")
 
-    raw, ctype, status = await proxy_chat_completions(
-        body,
-        user_id=getattr(user, "user_id", None) or getattr(user, "uid", ""),
-    )
+    raw, ctype, status = await proxy_chat_completions(body, user_id=user_id)
     return Response(
         content=raw,
         status_code=status,

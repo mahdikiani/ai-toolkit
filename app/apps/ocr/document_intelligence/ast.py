@@ -10,6 +10,8 @@ from .layout import LayoutElement, LayoutType
 
 @dataclass
 class ASTNode:
+    """A single node in the document AST (paragraph, heading, table, ...)."""
+
     type: LayoutType
     text: str = ""
     html: str = ""
@@ -28,6 +30,8 @@ class ASTNode:
 
 @dataclass
 class PageAST:
+    """AST nodes for a single rendered page, plus its pixel dimensions."""
+
     page_number: int
     nodes: list[ASTNode]
     # Pixel dimensions at the DPI the page was rendered at (same coordinate
@@ -40,6 +44,8 @@ class PageAST:
 
 @dataclass
 class DocumentAST:
+    """The full document AST: title, pages, and shared asset map."""
+
     title: str = ""
     pages: list[PageAST] = field(default_factory=list)
     assets: dict[str, str] = field(default_factory=dict)  # id -> path
@@ -115,7 +121,7 @@ def _heading_level(t: LayoutType) -> int:
 
 
 def _html_table_to_rows(html: str) -> list[list[str]]:
-    """Simple HTML table -> list of rows."""
+    """Convert a simple HTML table into a list of row cell-text lists."""
     import re
 
     rows: list[list[str]] = []

@@ -15,7 +15,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
-import httpx
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -115,7 +114,7 @@ async def create_chunk_plan(
 
 
 async def _download_audio(file_url: str, destination: Path) -> None:
-    """Download audio file from URL."""
+    """Download audio file from URL with SSRF protection."""
     if file_url.startswith("data:"):
         _, _, encoded_payload = file_url.partition(",")
         try:
@@ -126,14 +125,10 @@ async def _download_audio(file_url: str, destination: Path) -> None:
         await asyncio.to_thread(destination.write_bytes, payload)
         return
 
-    async with (
-        httpx.AsyncClient(follow_redirects=True) as client,
-        client.stream("GET", file_url, timeout=None) as response,
-    ):
-        response.raise_for_status()
-        with destination.open("wb") as file_handle:
-            async for chunk in response.aiter_bytes():
-                file_handle.write(chunk)
+    from utils.downloaders import download_bytes
+
+    buffer = await download_bytes(file_url)
+    await asyncio.to_thread(destination.write_bytes, buffer.getvalue())
 
 
 def _run_chunking_pipeline(

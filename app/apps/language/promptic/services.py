@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
-from fastapi import HTTPException
+from fastapi_mongo_base.core.exceptions import BaseHTTPException
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
 from server.config import Settings
@@ -27,9 +27,14 @@ def check_schemas(prompt_name: str, data: "PrompticCreate") -> None:
     prompt_path = prompts_dir / f"{prompt_name}.yaml"
 
     if not prompt_path.exists():
-        raise HTTPException(
+        raise BaseHTTPException(
             status_code=404,
+            error_code="prompt_not_found",
             detail=f"Prompt '{prompt_name}' not found",
+            message={
+                "en": f"Prompt '{prompt_name}' not found",
+                "fa": f"پرامپت '{prompt_name}' یافت نشد",
+            },
         )
 
 
@@ -106,9 +111,14 @@ async def invoke_stream(task: "PrompticTask") -> AsyncIterator[str]:
     prompt_path = prompts_dir / f"{task.prompt_name}.yaml"
 
     if not prompt_path.exists():
-        raise HTTPException(
+        raise BaseHTTPException(
             status_code=404,
+            error_code="prompt_not_found",
             detail=f"Prompt '{task.prompt_name}' not found",
+            message={
+                "en": f"Prompt '{task.prompt_name}' not found",
+                "fa": f"پرامپت '{task.prompt_name}' یافت نشد",
+            },
         )
 
     try:
@@ -211,6 +221,7 @@ async def process_promptic(
     return task
 
 
+# Backward-compatible alias used by older unit tests.
 process_execution_task = process_promptic
 
 

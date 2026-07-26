@@ -23,13 +23,18 @@ def _open(buf: BytesIO) -> WordDocument:
     return WordDocument(buf)
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestFormulaRendersRealOmml:
     """Formulas must become real, editable OMML equation objects, not text."""
 
     def test_valid_formula_produces_omath_xml(self) -> None:
         doc_ast = DocumentAST(
-            pages=[PageAST(page_number=1, nodes=[ASTNode(type=LayoutType.formula, latex=r"\frac{x^2}{y}")])]
+            pages=[
+                PageAST(
+                    page_number=1,
+                    nodes=[ASTNode(type=LayoutType.formula, latex=r"\frac{x^2}{y}")],
+                )
+            ]
         )
 
         buf = render_docx(doc_ast)
@@ -39,7 +44,12 @@ class TestFormulaRendersRealOmml:
 
     def test_invalid_formula_falls_back_to_styled_text_without_crashing(self) -> None:
         doc_ast = DocumentAST(
-            pages=[PageAST(page_number=1, nodes=[ASTNode(type=LayoutType.formula, latex="E=mc^2")])]
+            pages=[
+                PageAST(
+                    page_number=1,
+                    nodes=[ASTNode(type=LayoutType.formula, latex="E=mc^2")],
+                )
+            ]
         )
 
         with patch(
@@ -51,16 +61,13 @@ class TestFormulaRendersRealOmml:
 
         assert "oMath" not in doc.element.xml
         fallback_runs = [
-            run
-            for p in doc.paragraphs
-            for run in p.runs
-            if run.text == "E=mc^2"
+            run for p in doc.paragraphs for run in p.runs if run.text == "E=mc^2"
         ]
         assert fallback_runs
         assert fallback_runs[0].font.name == "Cambria Math"
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestTableRendersRealWordTable:
     def test_rows_become_a_real_table_object(self) -> None:
         node = ASTNode(type=LayoutType.table, rows=[["A", "B"], ["1", "2"]])
@@ -74,7 +81,7 @@ class TestTableRendersRealWordTable:
         assert table.cell(1, 1).text == "2"
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestHeaderFooterUseRealWordSections:
     """Headers/footers must land in doc.sections[].header/footer, not the body."""
 
@@ -101,7 +108,7 @@ class TestHeaderFooterUseRealWordSections:
         assert "Page footer" not in body_text
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestRtlLayout:
     def test_paragraphs_are_marked_bidi(self) -> None:
         node = ASTNode(type=LayoutType.paragraph, text="سلام دنیا")
@@ -114,7 +121,7 @@ class TestRtlLayout:
         assert "w:bidi" in body_paragraphs[0]._p.xml
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestDocumentTitleMetadata:
     def test_title_set_on_core_properties(self) -> None:
         doc_ast = DocumentAST(title="My Report", pages=[])
@@ -124,9 +131,10 @@ class TestDocumentTitleMetadata:
         assert doc.core_properties.title == "My Report"
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestFontDetection:
-    """The renderer must use the source PDF's real fonts when available,
+    """
+    The renderer must use the source PDF's real fonts when available,
     not always fall back to the fixed Calibri/B Nazanin defaults."""
 
     def test_detected_fonts_applied_to_normal_style(self) -> None:
@@ -165,9 +173,10 @@ class TestFontDetection:
         assert 'w:cs="B Nazanin"' in doc.styles["Normal"].element.xml
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestImageSizing:
-    """Images must be sized relative to their footprint on the source page,
+    """
+    Images must be sized relative to their footprint on the source page,
     not always dropped in at a fixed 5 inches."""
 
     def test_small_bbox_produces_small_width(self) -> None:
@@ -201,7 +210,9 @@ class TestImageSizing:
             asset_path=str(img_path),
             bbox=(0, 0, 500, 300),  # 50% of a 1000px-wide page
         )
-        page = PageAST(page_number=1, nodes=[node], page_width=1000, page_height=1400, page_dpi=100)
+        page = PageAST(
+            page_number=1, nodes=[node], page_width=1000, page_height=1400, page_dpi=100
+        )
         doc_ast = DocumentAST(pages=[page])
 
         doc = _open(render_docx(doc_ast))
@@ -212,10 +223,12 @@ class TestImageSizing:
         assert pic.width == Emu(Inches(4.2))
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestParagraphAlignment:
     def test_centered_narrow_bbox_gets_center_alignment(self) -> None:
-        node = ASTNode(type=LayoutType.paragraph, text="centered", bbox=(300, 0, 700, 30))
+        node = ASTNode(
+            type=LayoutType.paragraph, text="centered", bbox=(300, 0, 700, 30)
+        )
         page = PageAST(page_number=1, nodes=[node], page_width=1000, page_height=1400)
         doc_ast = DocumentAST(pages=[page])
 
@@ -226,7 +239,9 @@ class TestParagraphAlignment:
         assert matching[0].alignment == WD_ALIGN_PARAGRAPH.CENTER
 
     def test_off_center_bbox_stays_right_aligned(self) -> None:
-        node = ASTNode(type=LayoutType.paragraph, text="right side", bbox=(700, 0, 950, 30))
+        node = ASTNode(
+            type=LayoutType.paragraph, text="right side", bbox=(700, 0, 950, 30)
+        )
         page = PageAST(page_number=1, nodes=[node], page_width=1000, page_height=1400)
         doc_ast = DocumentAST(pages=[page])
 
@@ -247,11 +262,13 @@ class TestParagraphAlignment:
         assert matching[0].alignment == WD_ALIGN_PARAGRAPH.RIGHT
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestPageSize:
     def test_page_size_matches_source_page_dimensions(self) -> None:
         # 1000x1400 px at 100 dpi -> 10in x 14in
-        page = PageAST(page_number=1, nodes=[], page_width=1000, page_height=1400, page_dpi=100)
+        page = PageAST(
+            page_number=1, nodes=[], page_width=1000, page_height=1400, page_dpi=100
+        )
         doc_ast = DocumentAST(pages=[page])
 
         doc = _open(render_docx(doc_ast))

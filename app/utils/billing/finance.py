@@ -40,6 +40,10 @@ DEFAULT_PRICING: PricingConfig = {
         "default_per_1k_tokens": 1.0,
         "models": {},
     },
+    "speech": {
+        "markup": 1.0,
+        "default_per_1k_chars": 0.5,
+    },
     "ocr": {
         "default_per_page": 1.0,
         "engines": {},

@@ -14,8 +14,26 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 
 
+class UnsupportedSourceTypeError(TypeError):
+    """Raised when load_document receives an unsupported source type."""
+
+    def __init__(self, source_type: type) -> None:
+        """Initialize the error."""
+        super().__init__(f"Unsupported source type: {source_type}")
+
+
+class UnsupportedFileTypeError(ValueError):
+    """Raised when the document MIME type is not supported."""
+
+    def __init__(self, mime: str) -> None:
+        """Initialize the error."""
+        super().__init__(f"Unsupported file type: {mime}")
+
+
 @dataclass
 class Page:
+    """Represent Page."""
+
     id: str
     page_number: int
     image: Image.Image
@@ -26,6 +44,8 @@ class Page:
 
 @dataclass
 class Document:
+    """Represent Document."""
+
     id: str
     filename: str
     pages: list[Page]
@@ -48,7 +68,7 @@ def load_document(source: str | Path | BytesIO, dpi: int = 300) -> Document:
         source.seek(0)
         filename = getattr(source, "name", "unknown")
     else:
-        raise TypeError(f"Unsupported source type: {type(source)}")
+        raise UnsupportedSourceTypeError(type(source))
 
     mime = _detect_mime(raw_bytes, filename)
 
@@ -69,7 +89,7 @@ def load_document(source: str | Path | BytesIO, dpi: int = 300) -> Document:
             )
         ]
     else:
-        raise ValueError(f"Unsupported file type: {mime}")
+        raise UnsupportedFileTypeError(mime)
 
     logger.info("Loaded %s — %d pages (%s)", filename, len(pages), mime)
     return Document(
@@ -84,7 +104,6 @@ def load_document(source: str | Path | BytesIO, dpi: int = 300) -> Document:
 
 def _detect_mime(data: bytes, filename: str = "") -> str:
     """Detect MIME type from bytes or filename."""
-
     if data[:4] == b"%PDF":
         return "application/pdf"
     if data[:2] == b"\xff\xd8":

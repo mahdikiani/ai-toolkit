@@ -19,6 +19,7 @@ class ImagePreprocessor:
         enable_contrast: bool = True,
         enable_denoise: bool = False,
     ) -> None:
+        """Initialize the instance."""
         self.enable_deskew = enable_deskew
         self.enable_contrast = enable_contrast
         self.enable_denoise = enable_denoise

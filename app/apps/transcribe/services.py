@@ -165,7 +165,11 @@ async def _process_single_job(task: TranscribeTask, *, sync: bool) -> Transcribe
     await conditions.Conditions().wait_condition(task.uid)
 
     try:
-        finished_task = await TranscribeTask.get_item(task.uid, user_id=task.user_id)
+        finished_task = await TranscribeTask.get_item(
+            task.uid,
+            user_id=task.user_id,
+            tenant_id=task.tenant_id,
+        )
     except CollectionWasNotInitialized:
         finished_task = task
     if not finished_task or not finished_task.transcription_job_id:
@@ -215,7 +219,9 @@ async def _process_chunked_transcribe(
         }
         for chunk in chunk_plan.chunks
     ]
-    await task.save_report(f"Chunked into {len(chunk_plan.chunks)} segments")
+    await task.update_and_emit(
+        task_report=f"Chunked into {len(chunk_plan.chunks)} segments",
+    )
     await task.save()
 
     try:
@@ -241,7 +247,9 @@ async def _process_chunked_transcribe(
         }
         for result in ordered_results
     ]
-    await task.save_report(f"Transcribed {len(ordered_results)} chunks")
+    await task.update_and_emit(
+        task_report=f"Transcribed {len(ordered_results)} chunks",
+    )
     await task.save()
 
     combined_text = _combine_chunk_texts(ordered_results)
@@ -347,6 +355,9 @@ def _build_transcription_config(
         if chunk_id is not None:
             suffix = f"{suffix}/{chunk_id}"
         webhook_url = f"https://{Settings.root_url}{Settings.base_path}/{suffix}"
+        from .webhook_auth import append_webhook_auth
+
+        webhook_url = append_webhook_auth(webhook_url, task.uid)
     return TranscriptionConfig(
         language_hints=[Language.PERSIAN, Language.ENGLISH],
         enable_language_identification=True,

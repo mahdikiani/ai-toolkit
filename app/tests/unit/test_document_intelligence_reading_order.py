@@ -25,7 +25,7 @@ def _elem(
     )
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestDetectIsRtl:
     """Tests for auto language/direction detection."""
 
@@ -36,14 +36,24 @@ class TestDetectIsRtl:
 
     def test_detects_rtl_for_persian_text(self) -> None:
         elem = _elem("e1", 0, 0, 10, 10)
-        assert ReadingOrderResolver.detect_is_rtl([elem], {"e1": "سلام دنیا، این یک متن فارسی است"}) is True
+        assert (
+            ReadingOrderResolver.detect_is_rtl(
+                [elem], {"e1": "سلام دنیا، این یک متن فارسی است"}
+            )
+            is True
+        )
 
     def test_detects_ltr_for_english_text(self) -> None:
         elem = _elem("e1", 0, 0, 10, 10)
-        assert ReadingOrderResolver.detect_is_rtl([elem], {"e1": "hello world this is english text"}) is False
+        assert (
+            ReadingOrderResolver.detect_is_rtl(
+                [elem], {"e1": "hello world this is english text"}
+            )
+            is False
+        )
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestResolveFallbackOrdering:
     """Tests for the no-column fallback ordering path (< 3 candidate elements)."""
 
@@ -51,7 +61,9 @@ class TestResolveFallbackOrdering:
         left = _elem("left", 10, 10, 40, 40)
         right = _elem("right", 60, 10, 90, 40)
 
-        ordered = ReadingOrderResolver().resolve([left, right], page_width=100, is_rtl=True)
+        ordered = ReadingOrderResolver().resolve(
+            [left, right], page_width=100, is_rtl=True
+        )
 
         assert [e.id for e in ordered] == ["right", "left"]
 
@@ -59,7 +71,9 @@ class TestResolveFallbackOrdering:
         left = _elem("left", 10, 10, 40, 40)
         right = _elem("right", 60, 10, 90, 40)
 
-        ordered = ReadingOrderResolver().resolve([left, right], page_width=100, is_rtl=False)
+        ordered = ReadingOrderResolver().resolve(
+            [left, right], page_width=100, is_rtl=False
+        )
 
         assert [e.id for e in ordered] == ["left", "right"]
 
@@ -68,7 +82,9 @@ class TestResolveFallbackOrdering:
         right = _elem("right", 60, 10, 90, 40)
         texts = {"left": "hello", "right": "world"}
 
-        ordered = ReadingOrderResolver().resolve([left, right], page_width=100, texts=texts)
+        ordered = ReadingOrderResolver().resolve(
+            [left, right], page_width=100, texts=texts
+        )
 
         # English text -> LTR -> left element first.
         assert [e.id for e in ordered] == ["left", "right"]
@@ -77,35 +93,47 @@ class TestResolveFallbackOrdering:
         assert ReadingOrderResolver().resolve([], page_width=100) == []
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestDetectFullWidth:
-    """Regression: a heading/formula/etc. must be genuinely wide to be
+    """
+    Regression: a heading/formula/etc. must be genuinely wide to be
     treated as full-width — type alone used to force it, which scrambled
     reading order for narrow headings sitting in a side-by-side box."""
 
     def test_narrow_heading_is_not_forced_full_width(self) -> None:
-        narrow_heading = _elem("h", 400, 0, 550, 30, elem_type=LayoutType.heading)  # 15% of 1000
+        narrow_heading = _elem(
+            "h", 400, 0, 550, 30, elem_type=LayoutType.heading
+        )  # 15% of 1000
 
-        full_width = ReadingOrderResolver._detect_full_width([narrow_heading], page_width=1000)
+        full_width = ReadingOrderResolver._detect_full_width(
+            [narrow_heading], page_width=1000
+        )
 
         assert full_width == []
 
     def test_reasonably_wide_heading_is_still_full_width(self) -> None:
-        wide_heading = _elem("h", 50, 0, 600, 30, elem_type=LayoutType.heading)  # 55% of 1000
+        wide_heading = _elem(
+            "h", 50, 0, 600, 30, elem_type=LayoutType.heading
+        )  # 55% of 1000
 
-        full_width = ReadingOrderResolver._detect_full_width([wide_heading], page_width=1000)
+        full_width = ReadingOrderResolver._detect_full_width(
+            [wide_heading], page_width=1000
+        )
 
         assert full_width == [wide_heading]
 
     def test_very_wide_paragraph_is_full_width_regardless_of_type(self) -> None:
         wide_paragraph = _elem("p", 10, 0, 900, 30)  # 89% of 1000, plain paragraph
 
-        full_width = ReadingOrderResolver._detect_full_width([wide_paragraph], page_width=1000)
+        full_width = ReadingOrderResolver._detect_full_width(
+            [wide_paragraph], page_width=1000
+        )
 
         assert full_width == [wide_paragraph]
 
     def test_narrow_side_by_side_heading_now_sorts_with_its_column(self) -> None:
-        """The exact real-world case: a narrow heading box on the right and
+        """
+        The exact real-world case: a narrow heading box on the right and
         a narrow paragraph box on the left, at the same row — in RTL, the
         right box should be read first."""
         right_heading = _elem("right", 550, 100, 950, 160, elem_type=LayoutType.heading)
@@ -124,9 +152,10 @@ class TestDetectFullWidth:
         assert ordered[0].id == "right"
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestDetectColumns:
-    """Regression: KMeans with a fixed n_clusters always returns that many
+    """
+    Regression: KMeans with a fixed n_clusters always returns that many
     clusters — even on an essentially single-column page — fabricating
     false columns and scrambling reading order. A real x-gap must exist
     before we treat a page as multi-column."""

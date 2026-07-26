@@ -11,10 +11,12 @@ from apps.ocr.document_intelligence.renderers.markdown import (
 
 
 def _doc(*nodes: ASTNode, assets: dict[str, str] | None = None) -> DocumentAST:
-    return DocumentAST(pages=[PageAST(page_number=1, nodes=list(nodes))], assets=assets or {})
+    return DocumentAST(
+        pages=[PageAST(page_number=1, nodes=list(nodes))], assets=assets or {}
+    )
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestRenderMarkdown:
     """Tests for rendering each ASTNode type to Markdown."""
 
@@ -27,7 +29,9 @@ class TestRenderMarkdown:
         assert md.strip() == "## Section"
 
     def test_paragraph_renders_plain(self) -> None:
-        md = render_markdown(_doc(ASTNode(type=LayoutType.paragraph, text="hello world")))
+        md = render_markdown(
+            _doc(ASTNode(type=LayoutType.paragraph, text="hello world"))
+        )
         assert md.strip() == "hello world"
 
     def test_table_renders_as_markdown_table(self) -> None:
@@ -43,9 +47,7 @@ class TestRenderMarkdown:
         assert md.strip() == "$$\n\\frac{x^2}{y}\n$$"
 
     def test_figure_renders_image_link_with_asset_mapping(self) -> None:
-        node = ASTNode(
-            type=LayoutType.figure, caption="a cat", asset_path="/tmp/x.png"
-        )
+        node = ASTNode(type=LayoutType.figure, caption="a cat", asset_path="/tmp/x.png")
         md = render_markdown(_doc(node, assets={"/tmp/x.png": "assets/image_001.png"}))
         assert "![a cat](assets/image_001.png)" in md
 
@@ -74,24 +76,32 @@ class TestRenderMarkdown:
     def test_page_separator_between_multiple_pages(self) -> None:
         doc = DocumentAST(
             pages=[
-                PageAST(page_number=1, nodes=[ASTNode(type=LayoutType.paragraph, text="p1")]),
-                PageAST(page_number=2, nodes=[ASTNode(type=LayoutType.paragraph, text="p2")]),
+                PageAST(
+                    page_number=1, nodes=[ASTNode(type=LayoutType.paragraph, text="p1")]
+                ),
+                PageAST(
+                    page_number=2, nodes=[ASTNode(type=LayoutType.paragraph, text="p2")]
+                ),
             ]
         )
         md = render_markdown(doc)
         assert "---" in md
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestRewriteAssetLinks:
     """Tests for rewriting local asset paths to public URLs post-upload."""
 
     def test_replaces_known_local_path_with_url(self) -> None:
         md = "see ![cat](assets/image_001.png) above"
-        result = rewrite_asset_links(md, {"assets/image_001.png": "https://cdn.example/img.png"})
+        result = rewrite_asset_links(
+            md, {"assets/image_001.png": "https://cdn.example/img.png"}
+        )
         assert result == "see ![cat](https://cdn.example/img.png) above"
 
     def test_leaves_unmapped_links_untouched(self) -> None:
         md = "see ![cat](assets/image_001.png) above"
-        result = rewrite_asset_links(md, {"assets/other.png": "https://cdn.example/other.png"})
+        result = rewrite_asset_links(
+            md, {"assets/other.png": "https://cdn.example/other.png"}
+        )
         assert result == md

@@ -32,7 +32,7 @@ class WebpageRouter(AbstractTaskUSSORouter):
 
     def config_routes(self, **kwargs: object) -> None:
         """Configure task routes and the result download endpoint."""
-        super().config_routes(update_route=False, **kwargs)
+        super().config_routes(update_route=False, webhook_route=False, **kwargs)
         self.router.add_api_route(
             "/{uid}/result",
             self.get_result,

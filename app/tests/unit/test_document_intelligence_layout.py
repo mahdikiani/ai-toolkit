@@ -22,7 +22,7 @@ def _elem(elem_id: str, bbox: tuple[float, float, float, float]) -> LayoutElemen
     )
 
 
-@pytest.mark.unit
+@pytest.mark.document_intelligence
 class TestDeduplicateByIou:
     def test_high_iou_boxes_are_deduped(self) -> None:
         a = _elem("a", (0, 0, 100, 100))
@@ -33,7 +33,8 @@ class TestDeduplicateByIou:
         assert len(kept) == 1
 
     def test_low_iou_but_high_containment_is_deduped(self) -> None:
-        """v2/v3 ensemble: one model's box padded differently from the
+        """
+        v2/v3 ensemble: one model's box padded differently from the
         other's — low IOU, but one box is almost entirely inside the
         other. Regression: this used to survive dedup and double-OCR
         the same region."""

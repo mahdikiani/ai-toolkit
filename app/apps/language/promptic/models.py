@@ -2,27 +2,22 @@
 
 from typing import ClassVar
 
-from fastapi_mongo_base.models import UserOwnedEntity
+from fastapi_mongo_base.models import TenantUserEntity
 from fastapi_mongo_base.tasks import TaskStatusEnum
 from pymongo import ASCENDING, IndexModel
 
 from .schemas import PrompticSchema
 
 
-class PrompticTask(UserOwnedEntity, PrompticSchema):
-    """
-    Promptic task for prompt template invocations.
+class PrompticTask(TenantUserEntity, PrompticSchema):
+    """Promptic task for prompt template invocations."""
 
-    Inherits from UserOwnedEntity for user ownership and permissions.
-    Inherits from ExecutionTaskSchema for task lifecycle management and webhooks.
-    """
-
-    class Settings(UserOwnedEntity.Settings):
+    class Settings(TenantUserEntity.Settings):
         """Beanie document settings with promptic indexes."""
 
         name = "promptic"
         indexes: ClassVar[list[IndexModel]] = [
-            *UserOwnedEntity.Settings.indexes,
+            *TenantUserEntity.Settings.indexes,
             IndexModel([("idempotency_key", ASCENDING)]),
             IndexModel([("task_status", ASCENDING)]),
         ]
@@ -42,6 +37,3 @@ class PrompticTask(UserOwnedEntity, PrompticSchema):
         return await services.process_promptic(
             self, force_restart=force_restart, sync=sync, **kwargs
         )
-
-
-ExecutionTask = PrompticTask

@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi_mongo_base.core.exceptions import BaseHTTPException
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
 from apps.language.promptic.services import (
@@ -15,6 +15,22 @@ from apps.language.promptic.services import (
     check_schemas,
     process_execution_task,
 )
+
+
+def _task_mock(**attrs: object) -> MagicMock:
+    """Build a task double that supports awaitable update_and_emit."""
+    task = MagicMock()
+    for key, value in attrs.items():
+        setattr(task, key, value)
+    task.save = AsyncMock()
+
+    async def _update_and_emit(**kwargs: object) -> MagicMock:
+        for key, value in kwargs.items():
+            setattr(task, key, value)
+        return task
+
+    task.update_and_emit = AsyncMock(side_effect=_update_and_emit)
+    return task
 
 
 @pytest.mark.unit
@@ -37,10 +53,10 @@ class TestCheckSchemas:
             mock_settings.prompts_dir = tmp_path
             data = MagicMock()
 
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(BaseHTTPException) as exc_info:
                 check_schemas("nonexistent_prompt", data)
 
-            assert isinstance(exc_info.value, HTTPException)
+            assert isinstance(exc_info.value, BaseHTTPException)
             assert exc_info.value.status_code == 404
             assert "nonexistent_prompt" in exc_info.value.detail
 
@@ -202,10 +218,11 @@ class TestProcessExecutionTask:
             "task:\n  system:\n    persona: You are helpful\n  user: '{{ text }}'\n"
         )
 
-        task = MagicMock()
-        task.prompt_name = "test_prompt"
-        task.input_variables = {"text": "hello"}
-        task.save = AsyncMock()
+        task = _task_mock(
+            prompt_name="test_prompt",
+            input_variables={"text": "hello"},
+            user_id="user_123",
+        )
 
         with (
             patch("apps.language.promptic.services.Settings") as mock_settings,
@@ -213,6 +230,15 @@ class TestProcessExecutionTask:
                 "apps.language.promptic.services.call_openrouter",
                 new_callable=AsyncMock,
                 return_value="AI result",
+            ),
+            patch(
+                "apps.language.promptic.services.finance.meter_cost",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "apps.language.promptic.services.finance.estimate_text_cost",
+                return_value=1.0,
             ),
         ):
             mock_settings.prompts_dir = tmp_path
@@ -224,10 +250,7 @@ class TestProcessExecutionTask:
 
     async def test_sets_error_when_prompt_missing(self, tmp_path: Path) -> None:
         """process_execution_task should set error status when prompt is missing."""
-        task = MagicMock()
-        task.prompt_name = "missing_prompt"
-        task.input_variables = {}
-        task.save = AsyncMock()
+        task = _task_mock(prompt_name="missing_prompt", input_variables={})
 
         with patch("apps.language.promptic.services.Settings") as mock_settings:
             mock_settings.prompts_dir = tmp_path
@@ -244,10 +267,11 @@ class TestProcessExecutionTask:
             "task:\n  system:\n    persona: You are helpful\n  user: '{{ text }}'\n"
         )
 
-        task = MagicMock()
-        task.prompt_name = "test_prompt"
-        task.input_variables = {"text": "hello"}
-        task.save = AsyncMock()
+        task = _task_mock(
+            prompt_name="test_prompt",
+            input_variables={"text": "hello"},
+            user_id="user_123",
+        )
 
         with (
             patch("apps.language.promptic.services.Settings") as mock_settings,
@@ -280,10 +304,10 @@ class TestExecutionErrorHandling:
             mock_settings.prompts_dir = tmp_path
             data = MagicMock()
 
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(BaseHTTPException) as exc_info:
                 check_schemas("nonexistent_prompt", data)
 
-            assert isinstance(exc_info.value, HTTPException)
+            assert isinstance(exc_info.value, BaseHTTPException)
             assert exc_info.value.status_code == 404
             assert "nonexistent_prompt" in exc_info.value.detail
             assert "not found" in exc_info.value.detail.lower()
@@ -323,10 +347,11 @@ class TestExecutionErrorHandling:
             "task:\n  system:\n    persona: You are helpful\n  user: '{{ text }}'\n"
         )
 
-        task = MagicMock()
-        task.prompt_name = "test_prompt"
-        task.input_variables = {"text": "hello"}
-        task.save = AsyncMock()
+        task = _task_mock(
+            prompt_name="test_prompt",
+            input_variables={"text": "hello"},
+            user_id="user_123",
+        )
 
         # Test with RuntimeError (API error)
         with (
@@ -346,7 +371,7 @@ class TestExecutionErrorHandling:
         assert result.task_status == TaskStatusEnum.error
         assert result.error is not None
         assert "OpenRouter API error" in result.error
-        task.save.assert_called()
+        task.update_and_emit.assert_called()
 
     async def test_openrouter_network_error_sets_task_to_failed(
         self, tmp_path: Path
@@ -361,10 +386,11 @@ class TestExecutionErrorHandling:
             "task:\n  system:\n    persona: You are helpful\n  user: '{{ text }}'\n"
         )
 
-        task = MagicMock()
-        task.prompt_name = "test_prompt"
-        task.input_variables = {"text": "hello"}
-        task.save = AsyncMock()
+        task = _task_mock(
+            prompt_name="test_prompt",
+            input_variables={"text": "hello"},
+            user_id="user_123",
+        )
 
         # Test with generic Exception (network error)
         with (
@@ -382,7 +408,7 @@ class TestExecutionErrorHandling:
         assert result.task_status == TaskStatusEnum.error
         assert result.error is not None
         assert "Connection timeout" in result.error
-        task.save.assert_called()
+        task.update_and_emit.assert_called()
 
     async def test_missing_prompt_in_process_task_sets_error(
         self, tmp_path: Path
@@ -392,10 +418,10 @@ class TestExecutionErrorHandling:
 
         **Validates: Requirements 12.6, 12.9**
         """
-        task = MagicMock()
-        task.prompt_name = "nonexistent_prompt"
-        task.input_variables = {"text": "hello"}
-        task.save = AsyncMock()
+        task = _task_mock(
+            prompt_name="nonexistent_prompt",
+            input_variables={"text": "hello"},
+        )
 
         with patch("apps.language.promptic.services.Settings") as mock_settings:
             mock_settings.prompts_dir = tmp_path
@@ -405,4 +431,4 @@ class TestExecutionErrorHandling:
         assert result.error is not None
         assert "nonexistent_prompt" in result.error
         assert "not found" in result.error.lower()
-        task.save.assert_called()
+        task.update_and_emit.assert_called()

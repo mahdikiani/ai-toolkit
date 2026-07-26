@@ -32,7 +32,7 @@ class TranslateRouter(AbstractTaskUSSORouter):
 
     def config_routes(self, **kwargs: object) -> None:
         """Configure translation-specific API routes."""
-        super().config_routes(update_route=False, **kwargs)
+        super().config_routes(update_route=False, webhook_route=False, **kwargs)
         self.router.add_api_route(
             "/{uid}/result",
             self.get_result,

@@ -1,6 +1,6 @@
 """YouTube transcription task schemas."""
 
-from fastapi_mongo_base.schemas import UserOwnedEntitySchema
+from fastapi_mongo_base.schemas import TenantUserEntitySchema
 from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import Field, field_validator
 
@@ -25,7 +25,7 @@ class YoutubeTranscriptTaskSchemaCreate(TaskCreateFieldsMixin):
 
 
 class YoutubeTranscriptTaskSchema(
-    UserOwnedEntitySchema, TaskMixin, YoutubeTranscriptTaskSchemaCreate
+    TenantUserEntitySchema, TaskMixin, YoutubeTranscriptTaskSchemaCreate
 ):
     """Complete YouTube transcription task schema with result."""
 

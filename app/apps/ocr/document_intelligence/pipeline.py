@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PageStats:
+    """Represent PageStats."""
+
     page_number: int
     layout_time: float
     vlm_time: float
@@ -44,6 +46,8 @@ class PageStats:
 
 @dataclass
 class PipelineStats:
+    """Represent PipelineStats."""
+
     pages: list[PageStats] = field(default_factory=list)
     render_time: float = 0.0
     total_time: float = 0.0
@@ -51,6 +55,8 @@ class PipelineStats:
 
 @dataclass
 class PipelineResult:
+    """Represent PipelineResult."""
+
     markdown: str
     docx_bytes: bytes
     output_dir: Path
@@ -102,11 +108,14 @@ class DocumentIntelligencePipeline:
         openrouter_client: object | None = None,
         output_dir: str | Path | None = None,
     ) -> None:
+        """Initialize the instance."""
         from server.config import Settings
 
         self.dpi = dpi or Settings.ocr_pipeline_dpi
         self.output_dir = (
-            Path(output_dir) if output_dir else Path(tempfile.mkdtemp(prefix="di_output_"))
+            Path(output_dir)
+            if output_dir
+            else Path(tempfile.mkdtemp(prefix="di_output_"))
         )
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -117,10 +126,14 @@ class DocumentIntelligencePipeline:
                 else Settings.ocr_layout_confidence_threshold
             ),
             padding_ratio=(
-                padding_ratio if padding_ratio is not None else Settings.ocr_di_crop_padding_ratio
+                padding_ratio
+                if padding_ratio is not None
+                else Settings.ocr_di_crop_padding_ratio
             ),
             iou_threshold=(
-                iou_threshold if iou_threshold is not None else Settings.ocr_di_iou_threshold
+                iou_threshold
+                if iou_threshold is not None
+                else Settings.ocr_di_iou_threshold
             ),
         )
         self.element_processor = ElementProcessor(
@@ -183,7 +196,9 @@ class DocumentIntelligencePipeline:
             logger.warning("Page %d: no layout elements detected", page.page_number)
             return (
                 PageAST(page_number=page.page_number, nodes=[]),
-                PageStats(page_number=page.page_number, layout_time=layout_time, vlm_time=0.0),
+                PageStats(
+                    page_number=page.page_number, layout_time=layout_time, vlm_time=0.0
+                ),
             )
 
         t1 = time.time()
@@ -191,7 +206,9 @@ class DocumentIntelligencePipeline:
         vlm_time = time.time() - t1
 
         texts = {p.id: p.text for p in processed if p.text}
-        ordered = self.reading_order.resolve(list(layout_elements), page.width, texts=texts)
+        ordered = self.reading_order.resolve(
+            list(layout_elements), page.width, texts=texts
+        )
         page_ast = build_ast(
             processed, ordered, page.page_number, page.width, page.height, page.dpi
         )
@@ -232,7 +249,9 @@ class DocumentIntelligencePipeline:
                         int(elem.padded_bbox[3]),
                     ))
                     asset_type = "chart" if elem.type == LayoutType.chart else "figure"
-                    asset = self.asset_manager.save_image(crop, elem.id, type=asset_type)
+                    asset = self.asset_manager.save_image(
+                        crop, elem.id, asset_type=asset_type
+                    )
                     processed.asset_path = asset.path
                 return processed
 
@@ -242,12 +261,17 @@ class DocumentIntelligencePipeline:
         for p in stats.pages:
             logger.info(
                 "Page %d: layout=%.2fs vlm=%.2fs elements=%d",
-                p.page_number, p.layout_time, p.vlm_time, len(p.elements),
+                p.page_number,
+                p.layout_time,
+                p.vlm_time,
+                len(p.elements),
             )
         logger.info("Render: %.2fs, total: %.2fs", stats.render_time, stats.total_time)
 
     def cleanup(self) -> None:
         """
-        Remove the temp layout-crop dir. The output dir (md/docx/assets) is
-        left for the caller to upload/persist and clean up itself."""
+        Remove the temp layout-crop dir. The output dir (md/docx/assets) is.
+
+        left for the caller to upload/persist and clean up itself.
+        """
         self.layout_detector.cleanup()

@@ -8,7 +8,7 @@ from io import BytesIO
 
 from fastapi import Form
 from fastapi_mongo_base.core.exceptions import BaseHTTPException
-from fastapi_mongo_base.schemas import UserOwnedEntitySchema
+from fastapi_mongo_base.schemas import TenantUserEntitySchema
 from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import Field
 
@@ -139,7 +139,7 @@ class OcrTaskBase64Schema(TaskCreateFieldsMixin):
         )
 
 
-class OcrTaskSchema(UserOwnedEntitySchema, TaskMixin, OcrTaskSchemaCreate):
+class OcrTaskSchema(TenantUserEntitySchema, TaskMixin, OcrTaskSchemaCreate):
     """Complete OCR task schema including result and usage fields."""
 
     result: str | None = None

@@ -17,27 +17,30 @@ from apps.transcribe.services import (
 )
 
 
+def _transcribe_task(**overrides: object) -> TranscribeTaskSchema:
+    data: dict[str, object] = {
+        "uid": "task_123",
+        "user_id": "user_123",
+        "tenant_id": "tenant_123",
+        "file_url": "https://example.com/audio.mp3",
+    }
+    data.update(overrides)
+    return TranscribeTaskSchema(**data)
+
+
 @pytest.mark.unit
 class TestTranscribeAudioDuration:
     """Tests for TranscribeTaskSchema audio_duration property."""
 
     def test_uses_explicit_audio_duration_seconds(self) -> None:
         """audio_duration should prefer explicit client-provided seconds."""
-        task = TranscribeTaskSchema(
-            uid="task_123",
-            user_id="user_123",
-            file_url="https://example.com/audio.mp3",
-            audio_duration_seconds=12.5,
-        )
+        task = _transcribe_task(audio_duration_seconds=12.5)
 
         assert task.audio_duration == pytest.approx(12.5)
 
     def test_uses_provider_meta_duration(self) -> None:
         """audio_duration should use persisted provider usage metadata."""
-        task = TranscribeTaskSchema(
-            uid="task_123",
-            user_id="user_123",
-            file_url="https://example.com/audio.mp3",
+        task = _transcribe_task(
             provider_meta={"usage": {"audio_duration_seconds": 30}},
         )
 
@@ -45,10 +48,7 @@ class TestTranscribeAudioDuration:
 
     def test_uses_chunk_end_time(self) -> None:
         """audio_duration should derive seconds from chunk metadata."""
-        task = TranscribeTaskSchema(
-            uid="task_123",
-            user_id="user_123",
-            file_url="https://example.com/audio.mp3",
+        task = _transcribe_task(
             chunks=[
                 ChunkMetadata(chunk_id=0, start_ms=0, end_ms=1000, file_path="a.wav"),
                 ChunkMetadata(
@@ -64,11 +64,7 @@ class TestTranscribeAudioDuration:
 
     def test_unknown_duration_is_zero(self) -> None:
         """audio_duration should not guess when no metadata is available."""
-        task = TranscribeTaskSchema(
-            uid="task_123",
-            user_id="user_123",
-            file_url="https://example.com/audio.mp3",
-        )
+        task = _transcribe_task()
 
         assert task.audio_duration == pytest.approx(0.0)
 
@@ -172,7 +168,7 @@ class TestSaveError:
     async def test_sets_error_status(self) -> None:
         """save_error should set task status to error."""
         task = MagicMock()
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         with patch(
             "apps.transcribe.services.conditions.Conditions",
@@ -184,13 +180,16 @@ class TestSaveError:
             await save_error(task, "transcription failed")
 
         assert task.task_status == TaskStatusEnum.error
-        task.save_report.assert_called_once_with("transcription failed")
+        task.update_and_emit.assert_awaited_once_with(
+            task_report="transcription failed",
+            log_type="error",
+        )
 
     async def test_releases_condition(self) -> None:
         """save_error should release the condition for the task."""
         task = MagicMock()
         task.uid = "task_123"
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         with patch(
             "apps.transcribe.services.conditions.Conditions",
@@ -211,7 +210,7 @@ class TestSaveResult:
     async def test_sets_completed_status(self) -> None:
         """save_result should set task status to completed."""
         task = MagicMock()
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         await save_result(task, "Transcribed text")
 
@@ -220,7 +219,7 @@ class TestSaveResult:
     async def test_normalizes_text(self) -> None:
         """save_result should normalize the result text."""
         task = MagicMock()
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         await save_result(task, "  Text with spaces  ")
 
@@ -229,7 +228,7 @@ class TestSaveResult:
     async def test_saves_usage_info(self) -> None:
         """save_result should save usage amount and ID."""
         task = MagicMock()
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         await save_result(task, "text", usage_amount=10.0, usage_id="usage_456")
 
@@ -239,12 +238,14 @@ class TestSaveResult:
     async def test_emits_webhook_after_result_is_stored(self) -> None:
         """save_result persists the result before the completion webhook emits."""
         task = MagicMock()
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         await save_result(task, "Transcribed text")
 
         assert task.result == "Transcribed text"
-        task.save_report.assert_awaited_once_with("Task processed successfully")
+        task.update_and_emit.assert_awaited_once_with(
+            task_report="Task processed successfully",
+        )
 
 
 @pytest.mark.unit
@@ -259,7 +260,7 @@ class TestProcessTranscribe:
         task.uid = "task_123"
         task.user_id = "user_123"
         task.audio_duration = 10.0
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         with (
             patch(
@@ -287,7 +288,7 @@ class TestProcessTranscribe:
         task.uid = "task_123"
         task.user_id = "user_123"
         task.audio_duration = 10.0
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
         task.save = AsyncMock(return_value=task)
 
         with (
@@ -323,7 +324,7 @@ class TestProcessTranscribe:
         task.uid = "task_123"
         task.user_id = "user_123"
         task.audio_duration = 10.0
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         with (
             patch(
@@ -364,7 +365,7 @@ class TestTranscriptionQuotaAndMetering:
         task.uid = "task_123"
         task.user_id = "user_123"
         task.audio_duration = 10.0
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         with (
             patch(
@@ -404,7 +405,7 @@ class TestTranscriptionQuotaAndMetering:
         task.uid = "task_123"
         task.user_id = "user_123"
         task.file_url = "https://example.com/audio.mp3"
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
         task.save = AsyncMock(return_value=task)
 
         # Create mock chunks
@@ -474,7 +475,7 @@ class TestTranscriptionQuotaAndMetering:
         task.user_id = "user_123"
         task.transcription_job_id = "job_123"
         task.task_status = TaskStatusEnum.processing
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
         task.save = AsyncMock(return_value=task)
 
         webhook_data = MagicMock()
@@ -533,11 +534,11 @@ class TestTranscriptionErrorHandling:
         task = MagicMock()
         task.uid = "task_123"
         task.user_id = "user_123"
+        task.tenant_id = "tenant_123"
         task.file_url = "https://example.com/audio.mp3"
         task.transcription_job_id = "job_123"
-        task.item_webhook_url = "https://example.com/webhook"
         task.save = AsyncMock(return_value=task)
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         mock_job = MagicMock()
         mock_job.id = "job_123"
@@ -614,7 +615,7 @@ class TestTranscriptionErrorHandling:
 
         task = MagicMock()
         task.uid = "task_123"
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         with patch(
             "apps.transcribe.services.conditions.Conditions",
@@ -625,7 +626,10 @@ class TestTranscriptionErrorHandling:
 
             await save_error(task, "transcription_job_failed")
 
-        task.save_report.assert_called_once_with("transcription_job_failed")
+        task.update_and_emit.assert_awaited_once_with(
+            task_report="transcription_job_failed",
+            log_type="error",
+        )
         assert task.task_status == TaskStatusEnum.error
 
     async def test_handles_webhook_error_status(self) -> None:
@@ -638,7 +642,7 @@ class TestTranscriptionErrorHandling:
         task.uid = "task_123"
         task.user_id = "user_123"
         task.transcription_job_id = "job_123"
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         webhook_data = MagicMock()
         webhook_data.id = "job_123"
@@ -675,7 +679,7 @@ class TestTranscriptionErrorHandling:
         task.uid = "task_123"
         task.user_id = "user_123"
         task.transcription_job_id = "job_123"
-        task.save_report = AsyncMock()
+        task.update_and_emit = AsyncMock()
 
         webhook_data = MagicMock()
         webhook_data.id = "different_job_456"
@@ -701,7 +705,7 @@ class TestTranscriptionErrorHandling:
             result = await process_transcription_webhook(task, webhook_data)
 
         assert result.task_status == TaskStatusEnum.error
-        task.save_report.assert_called_once()
+        task.update_and_emit.assert_awaited_once()
 
 
 @pytest.mark.unit
@@ -746,21 +750,17 @@ class TestTranscribeFileContent:
 
     async def test_fetches_from_http_url(self) -> None:
         """file_content should fetch content from HTTP URLs."""
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import AsyncMock, patch
 
         from apps.transcribe.schemas import TranscribeTaskSchemaCreate
 
         schema = TranscribeTaskSchemaCreate(file_url="https://example.com/a.mp3")
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_response = MagicMock()
-            mock_response.content = b"audio data"
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
-
+        with patch(
+            "apps.transcribe.schemas.download_bytes",
+            new_callable=AsyncMock,
+            return_value=__import__("io").BytesIO(b"audio data"),
+        ):
             content = await schema.file_content()
             assert content.read() == b"audio data"
 
@@ -860,26 +860,14 @@ class TestTranscribeAudioDurationMetaData:
 
     def test_uses_meta_data_audio_duration_seconds(self) -> None:
         """audio_duration should fall back to meta_data.audio_duration_seconds."""
-        from apps.transcribe.schemas import TranscribeTaskSchema
 
-        task = TranscribeTaskSchema(
-            uid="task_123",
-            user_id="user_123",
-            file_url="https://example.com/audio.mp3",
-            meta_data={"audio_duration_seconds": 42.5},
-        )
+        task = _transcribe_task(meta_data={"audio_duration_seconds": 42.5})
 
         assert task.audio_duration == pytest.approx(42.5)
 
     def test_uses_meta_data_audio_duration_ms(self) -> None:
         """audio_duration should fall back to meta_data.audio_duration_ms."""
-        from apps.transcribe.schemas import TranscribeTaskSchema
 
-        task = TranscribeTaskSchema(
-            uid="task_123",
-            user_id="user_123",
-            file_url="https://example.com/audio.mp3",
-            meta_data={"audio_duration_ms": 55000},
-        )
+        task = _transcribe_task(meta_data={"audio_duration_ms": 55000})
 
         assert task.audio_duration == pytest.approx(55.0)

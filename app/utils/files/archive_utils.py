@@ -23,6 +23,20 @@ COMPRESSED_EXTS = {
 }
 
 
+def _safe_member_path(temp_dir: Path, member_name: str) -> Path:
+    """Resolve archive member path and reject zip-slip / absolute paths."""
+    cleaned = member_name.replace("\\", "/").lstrip("/")
+    if not cleaned or cleaned.endswith("/"):
+        raise ValueError("invalid_archive_member")
+    candidate = (temp_dir / cleaned).resolve()
+    temp_root = temp_dir.resolve()
+    try:
+        candidate.relative_to(temp_root)
+    except ValueError as exc:
+        raise ValueError("archive_member_escape") from exc
+    return candidate
+
+
 def _extract_zip(file_content: BytesIO, temp_dir: Path) -> list[Path]:
     """Extract ZIP file to temp directory."""
     import zipfile
@@ -31,7 +45,7 @@ def _extract_zip(file_content: BytesIO, temp_dir: Path) -> list[Path]:
     with zipfile.ZipFile(file_content) as zip_file:
         for file_info in zip_file.filelist:
             if not file_info.is_dir():
-                extracted_path = temp_dir / file_info.filename
+                extracted_path = _safe_member_path(temp_dir, file_info.filename)
                 extracted_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(extracted_path, "wb") as f:
                     f.write(zip_file.read(file_info.filename))
@@ -47,10 +61,13 @@ def _extract_tar(file_content: BytesIO, temp_dir: Path) -> list[Path]:
     with tarfile.open(fileobj=file_content, mode="r") as tar_file:
         for member in tar_file.getmembers():
             if member.isfile():
-                extracted_path = temp_dir / member.name
+                extracted_path = _safe_member_path(temp_dir, member.name)
                 extracted_path.parent.mkdir(parents=True, exist_ok=True)
+                source = tar_file.extractfile(member)
+                if source is None:
+                    continue
                 with open(extracted_path, "wb") as f:
-                    f.write(tar_file.extractfile(member).read())
+                    f.write(source.read())
                 extracted_paths.append(extracted_path)
     return extracted_paths
 

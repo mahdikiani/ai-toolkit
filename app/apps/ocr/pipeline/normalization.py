@@ -16,13 +16,13 @@ def _normalize_characters(text: str) -> str:
     text = text.replace("ي", "ی")
     text = text.replace("ك", "ک")
     text = text.replace("ى", "ی")
-    text = text.replace("ۀ", "ه")
-    text = text.replace("ة", "ه")
-    text = text.replace("إ", "ا")
-    text = text.replace("أ", "ا")
+    text = text.replace("ۀ", "ه")  # ruff: ignore[ambiguous-unicode-character-string]
+    text = text.replace("ة", "ه")  # ruff: ignore[ambiguous-unicode-character-string]
+    text = text.replace("إ", "ا")  # ruff: ignore[ambiguous-unicode-character-string]
+    text = text.replace("أ", "ا")  # ruff: ignore[ambiguous-unicode-character-string]
     text = text.replace("ؤ", "و")
     text = text.replace("ئ", "ی")
-    text = text.replace("ٱ", "ا")
+    text = text.replace("ٱ", "ا")  # ruff: ignore[ambiguous-unicode-character-string]
     text = re.sub(r"[\u0640]+", "", text)  # remove kashida
     text = re.sub(r"[\u0654\u0655]", "", text)  # remove hamza above/below
     return text

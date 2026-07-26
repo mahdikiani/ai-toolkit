@@ -1,6 +1,6 @@
 """Webpage extraction task schemas."""
 
-from fastapi_mongo_base.schemas import UserOwnedEntitySchema
+from fastapi_mongo_base.schemas import TenantUserEntitySchema
 from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import Field
 
@@ -12,7 +12,7 @@ class WebpageTaskSchemaCreate(TaskCreateFieldsMixin):
     webhook_custom_headers: dict | None = None
 
 
-class WebpageTaskSchema(UserOwnedEntitySchema, TaskMixin, WebpageTaskSchemaCreate):
+class WebpageTaskSchema(TenantUserEntitySchema, TaskMixin, WebpageTaskSchemaCreate):
     """Complete webpage extraction task schema with result."""
 
     result: str | None = None

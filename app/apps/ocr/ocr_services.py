@@ -7,13 +7,13 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 from PIL import Image
 
 from server.config import Settings
 from utils.files import imagetools
 from utils.integrations.openrouter import complete_chat_json
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -56,7 +56,8 @@ async def ocr_to_text(
     model: str | None = None,
     block_type: str = "paragraph",
 ) -> str:
-    """Extract text from a single document element crop.
+    """
+    Extract text from a single document element crop.
 
     - Each element (title, paragraph, table, etc.) is sent to VLM independently.
     - If the API errors, retry once at lower resolution.
@@ -67,7 +68,9 @@ async def ocr_to_text(
     with Image.open(image) as opened_image:
         img = opened_image.copy()
 
-    context = f"Element type: {block_type}. Extract ONLY the visible text in this region."
+    context = (
+        f"Element type: {block_type}. Extract ONLY the visible text in this region."
+    )
     result, api_error = await _ocr_attempt(
         img, prompt, model, context, max_dim=MAX_DIM, quality=85
     )
@@ -77,8 +80,12 @@ async def ocr_to_text(
     if api_error:
         logger.warning("OCR API error; retrying with fallback resolution")
         result, _ = await _ocr_attempt(
-            img, prompt, model, context,
-            max_dim=FALLBACK_DIM, quality=FALLBACK_QUALITY,
+            img,
+            prompt,
+            model,
+            context,
+            max_dim=FALLBACK_DIM,
+            quality=FALLBACK_QUALITY,
         )
         return result or ""
 
@@ -94,7 +101,8 @@ async def _ocr_attempt(
     max_dim: int,
     quality: int,
 ) -> tuple[str | None, bool]:
-    """Try one OCR call.
+    """
+    Try one OCR call.
 
     Returns (text | None, had_api_error).
     - None + False → API returned empty (OK, page might be blank/image-only)
@@ -124,24 +132,35 @@ async def _ocr_attempt(
                 {"role": "user", "content": user_content},
             ],
         })
+    except Exception as exc:
+        logger.warning(
+            "OCR API error for %dx%d (max_dim=%d, quality=%d): %s",
+            img.width,
+            img.height,
+            max_dim,
+            quality,
+            exc,
+        )
+        return None, True
+    else:
         text = response["choices"][0]["message"]["content"].strip()
         if text:
             logger.info(
                 "OCR %d chars from %dx%d image (max_dim=%d, quality=%d)",
-                len(text), img.width, img.height, max_dim, quality,
+                len(text),
+                img.width,
+                img.height,
+                max_dim,
+                quality,
             )
             return text, False
         logger.info(
             "OCR empty (page %dx%d may be blank/image-only; max_dim=%d)",
-            img.width, img.height, max_dim,
+            img.width,
+            img.height,
+            max_dim,
         )
         return None, False
-    except Exception as exc:
-        logger.warning(
-            "OCR API error for %dx%d (max_dim=%d, quality=%d): %s",
-            img.width, img.height, max_dim, quality, exc,
-        )
-        return None, True
 
 
 async def process_pages_batch(

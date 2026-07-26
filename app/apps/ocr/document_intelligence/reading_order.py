@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
 
 from .layout import LayoutElement, LayoutType
@@ -35,7 +36,8 @@ class ReadingOrderResolver:
         texts: dict[str, str] | None = None,
     ) -> list[LayoutElement]:
         """
-        Order elements for reading. If ``is_rtl`` is omitted, it is
+        Order elements for reading. If ``is_rtl`` is omitted, it is.
+
         auto-detected from ``texts`` (element_id -> extracted text) via
         script-range language detection, defaulting to RTL when no text is
         available yet (this pipeline targets Persian/Arabic documents).
@@ -59,9 +61,7 @@ class ReadingOrderResolver:
 
         # Sort columns: RTL (rightmost first) or LTR (leftmost first)
         columns.sort(
-            key=lambda c: (
-                sum(e.bbox[0] for e in c) / max(len(c), 1),
-            ),
+            key=lambda c: (sum(e.bbox[0] for e in c) / max(len(c), 1),),
             reverse=is_rtl,
         )
         ordered_cols: list[LayoutElement] = []
@@ -98,12 +98,15 @@ class ReadingOrderResolver:
     def _detect_full_width(
         elements: list[LayoutElement], page_width: float
     ) -> list[LayoutElement]:
-        """An element is full-width if it's actually wide, or wide *enough*
+        """
+        Describe element is full-width if it's actually wide, or wide *enough*.
+
         for its type to plausibly span the page. Type alone is not enough:
         a narrow heading sitting inside a side-by-side box next to another
         box must NOT be forced full-width, or it gets sorted purely by y
         and loses its real column position (e.g. it jumps ahead of a
-        right-hand-side box it should read after in RTL)."""
+        right-hand-side box it should read after in RTL).
+        """
         return [
             e
             for e in elements
@@ -127,16 +130,14 @@ class ReadingOrderResolver:
         # pulling the spread up — fabricating false columns there scrambles
         # reading order. Only proceed if there's a genuinely large gap
         # separating groups of x-centers (real columns), not just noise.
-        gaps = [b - a for a, b in zip(centers, centers[1:])]
+        gaps = [b - a for a, b in itertools.pairwise(centers)]
         if max(gaps) < span * COLUMN_GAP_MIN_RATIO:
             return []
         try:
             from sklearn.cluster import KMeans
 
             x_centers = [[(e.bbox[0] + e.bbox[2]) / 2] for e in elements]
-            kmeans = KMeans(
-                n_clusters=min(3, len(elements)), n_init=1, random_state=0
-            )
+            kmeans = KMeans(n_clusters=min(3, len(elements)), n_init=1, random_state=0)
             labels = kmeans.fit_predict(x_centers)
             cols: dict[int, list[LayoutElement]] = {}
             for elem, label in zip(elements, labels, strict=True):

@@ -1,15 +1,14 @@
 # Completion
 
-Completion exposes OpenAI-compatible proxy endpoints.
+Shared helpers for OpenAI-compatible chat completions.
 
-## Responsibilities
+## Canonical surface
 
-- Authenticate requests with USSO.
-- Proxy `/v1/chat/completions` style requests to configured providers.
-- Support streaming and non-streaming responses.
-- Preserve response shape for clients.
-- Meter provider usage when non-streaming provider metadata is available.
+Prefer the mounted OpenAI-compat API:
 
-## API
+- `POST /api/ai/v1/openai/v1/chat/completions`
+- `POST /api/ai/v1/openai/v1/audio/speech`
+- `POST /api/ai/v1/openai/v1/audio/transcriptions`
 
-- `POST /api/ai/v1/chat/completions`
+This package reuses `apps.openai_compat.services` for proxy + metering (including streams).
+The optional `routes.py` alias (`/chat/completions`) is not mounted by default.

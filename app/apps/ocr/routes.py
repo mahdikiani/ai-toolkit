@@ -45,7 +45,7 @@ class OCRRouter(AbstractTaskUSSORouter):
 
     def config_routes(self, **kwargs: object) -> None:
         """Configure OCR-specific API routes."""
-        super().config_routes(update_route=False, **kwargs)
+        super().config_routes(update_route=False, webhook_route=False, **kwargs)
         self.router.add_api_route(
             "/{uid:str}/start",
             self.start_item,

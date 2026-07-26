@@ -83,12 +83,36 @@ select = [
     "ERA",   # remove commented code
     "RUF",   # ruff-specific improvements
 ]
-ignore = ["COM812", "B008", "D202", "D203", "D209", "D212", "D413"]
+ignore = [
+    "missing-trailing-comma",
+    "function-call-in-default-argument",
+    "blank-line-after-function",
+    "incorrect-blank-line-before-class",
+    "new-line-after-last-paragraph",
+    "multi-line-summary-first-line",
+    "missing-blank-line-after-last-section",
+]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]
-
-
+# Same test convention as mirza-bot: tests are not public API docs.
+"tests/*" = [
+    "assert",
+    "undocumented-public-module",
+    "undocumented-public-class",
+    "undocumented-public-method",
+    "undocumented-public-function",
+    "undocumented-public-package",
+    "undocumented-magic-method",
+    "undocumented-public-init",
+    "ANN",
+    "unused-async",
+    "line-too-long",
+    "hardcoded-password-string",
+    "hardcoded-password-func-arg",
+    "hardcoded-temp-file",
+    "missing-blank-line-after-summary",
+    "ambiguous-unicode-character-string",
+]
 [tool.ruff.format]
 quote-style = "double"
 

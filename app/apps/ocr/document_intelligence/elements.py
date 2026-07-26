@@ -16,9 +16,14 @@ from .layout import LayoutElement, LayoutType
 logger = logging.getLogger(__name__)
 
 TEXT_TYPES = {
-    LayoutType.title, LayoutType.heading, LayoutType.paragraph,
-    LayoutType.list, LayoutType.header, LayoutType.footer,
-    LayoutType.reference, LayoutType.figure_caption,
+    LayoutType.title,
+    LayoutType.heading,
+    LayoutType.paragraph,
+    LayoutType.list,
+    LayoutType.header,
+    LayoutType.footer,
+    LayoutType.reference,
+    LayoutType.figure_caption,
 }
 
 _PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
@@ -32,9 +37,14 @@ def _read_prompt(name: str) -> str:
 
 @dataclass
 class ProcessedElement:
-    # All fields default so handlers can build a ProcessedElement with only
-    # the content fields set; process() fills id/page_id/.../confidence in
-    # from the source LayoutElement right after the handler returns.
+    """
+    Result of processing one layout element through a VLM handler.
+
+    All fields default so handlers can build a ProcessedElement with only
+    the content fields set; process() fills id/page_id/.../confidence in
+    from the source LayoutElement right after the handler returns.
+    """
+
     id: str = ""
     page_id: str = ""
     page_number: int = 0
@@ -61,9 +71,10 @@ class ElementProcessor:
     def __init__(
         self,
         vlm_model: str | None = None,
-        openrouter_client=None,
+        openrouter_client: object | None = None,
         max_concurrent: int = 5,
-    ):
+    ) -> None:
+        """Configure the VLM model and optional injected client for tests."""
         if vlm_model is None:
             from server.config import Settings
 
@@ -77,9 +88,12 @@ class ElementProcessor:
     async def process(
         self, elem: LayoutElement, page_image: Image.Image
     ) -> ProcessedElement:
+        """Route *elem* to the matching VLM handler and record stats."""
         crop_image = page_image.crop((
-            int(elem.padded_bbox[0]), int(elem.padded_bbox[1]),
-            int(elem.padded_bbox[2]), int(elem.padded_bbox[3]),
+            int(elem.padded_bbox[0]),
+            int(elem.padded_bbox[1]),
+            int(elem.padded_bbox[2]),
+            int(elem.padded_bbox[3]),
         ))
         t0 = time.time()
 
@@ -119,8 +133,12 @@ class ElementProcessor:
         return result
 
     async def _vlm_call(
-        self, crop: Image.Image, system_prompt: str, user_prompt: str,
-        response_format: dict | None = None, max_tokens: int = 1024,
+        self,
+        crop: Image.Image,
+        system_prompt: str,
+        user_prompt: str,
+        response_format: dict | None = None,
+        max_tokens: int = 1024,
     ) -> str:
         buf = BytesIO()
         crop.save(buf, format="JPEG", quality=85)
@@ -156,6 +174,7 @@ class ElementProcessor:
             return content
 
         from utils.integrations.openrouter import complete_chat_json
+
         body = {
             "model": self.vlm_model,
             "messages": [
@@ -203,7 +222,7 @@ class ElementProcessor:
         sp = _read_prompt("formula")
         up = "Extract the formula as LaTeX."
         latex = await self._vlm_call(crop, sp, up, max_tokens=1024)
-        latex = latex.strip("`").strip().strip("$$").strip()
+        latex = latex.strip("`").strip().strip("$").strip()
         return ProcessedElement(text=latex, latex=latex)
 
     async def _process_figure(
@@ -214,7 +233,11 @@ class ElementProcessor:
         desc = await self._vlm_call(crop, sp, up, max_tokens=512)
         caption, description = desc, desc
         if "caption:" in desc.lower():
-            parts = desc.split("description:", 1) if "description:" in desc.lower() else [desc]
+            parts = (
+                desc.split("description:", 1)
+                if "description:" in desc.lower()
+                else [desc]
+            )
             if len(parts) > 1:
                 caption = parts[0].replace("caption:", "").strip()
                 description = parts[1].strip()
@@ -226,16 +249,24 @@ class ElementProcessor:
         sp = _read_prompt("chart")
         up = "Extract this chart's information as JSON."
         import json as _json
+
         try:
             text = await self._vlm_call(
-                crop, sp, up,
+                crop,
+                sp,
+                up,
                 response_format={"type": "json_object"},
                 max_tokens=2048,
             )
             data = _json.loads(text)
         except Exception:
             text = await self._vlm_call(crop, sp, up, max_tokens=2048)
-            data = {"chart_type": "unknown", "title": "", "description": text, "data": []}
+            data = {
+                "chart_type": "unknown",
+                "title": "",
+                "description": text,
+                "data": [],
+            }
         return ProcessedElement(
             text=data.get("description", ""),
             caption=data.get("title", ""),
@@ -252,12 +283,11 @@ class ElementProcessor:
         return ProcessedElement(text=text)
 
     def log_stats(self) -> None:
+        """Log per-type average processing duration."""
         if not self.stats:
             return
         by_type: dict[str, list[float]] = {}
         for s in self.stats:
             by_type.setdefault(s["type"], []).append(s["duration"])
         for t, ds in sorted(by_type.items()):
-            logger.info(
-                "  %s: %d elements, avg %.2fs", t, len(ds), sum(ds) / len(ds)
-            )
+            logger.info("  %s: %d elements, avg %.2fs", t, len(ds), sum(ds) / len(ds))

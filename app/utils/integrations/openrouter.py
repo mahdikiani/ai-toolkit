@@ -219,8 +219,18 @@ async def stream_chat_completion_bytes(
                     )
                     await queue.put(error)
                     return
+                total_bytes = 0
+                max_bytes = Settings.openai_stream_max_bytes
                 async for chunk in resp.aiter_bytes():
                     if chunk:
+                        total_bytes += len(chunk)
+                        if total_bytes > max_bytes:
+                            error = OpenRouterError(
+                                413,
+                                f"Stream response exceeded {max_bytes} bytes",
+                            )
+                            await queue.put(error)
+                            return
                         await queue.put(chunk)
         except Exception as error:
             await queue.put(error)

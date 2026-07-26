@@ -11,7 +11,6 @@ from soniox.types import TranscriptionWebhook
 
 from server.config import Settings
 from utils.auth import authorize_create_on_behalf
-from utils.integrations import speechmatics
 from utils.task_routes import AbstractTaskUSSORouter
 
 from . import services
@@ -22,6 +21,7 @@ from .schemas import (
     TranscribeTaskSchemaCreate,
     TranscribeTaskUploadFormSchema,
 )
+from .webhook_auth import verify_webhook_request
 
 
 class TranscribeRouter(AbstractTaskUSSORouter):
@@ -41,7 +41,7 @@ class TranscribeRouter(AbstractTaskUSSORouter):
 
     def config_routes(self, **kwargs: object) -> None:
         """Configure transcription-specific API routes."""
-        super().config_routes(update_route=False, **kwargs)
+        super().config_routes(update_route=False, webhook_route=False, **kwargs)
         self.router.add_api_route(
             "/{uid}/webhook",
             self.webhook,
@@ -152,10 +152,12 @@ class TranscribeRouter(AbstractTaskUSSORouter):
         request: Request,
         background_tasks: BackgroundTasks,
         uid: str,
-        data: speechmatics.TranscribeWebhookSchema | TranscriptionWebhook | None = None,
+        data: TranscriptionWebhook | None = None,
         status: str | None = None,
+        token: str | None = Query(None),
     ) -> dict:
-        """Handle transcription completion webhook."""
+        """Handle transcription completion webhook (Soniox)."""
+        verify_webhook_request(uid=uid, token=token)
         item: TranscribeTask = await self.get_item(
             uid, user_id=None, ignore_user_id=True
         )
@@ -177,10 +179,12 @@ class TranscribeRouter(AbstractTaskUSSORouter):
         background_tasks: BackgroundTasks,
         uid: str,
         chunk_id: int,
-        data: speechmatics.TranscribeWebhookSchema | TranscriptionWebhook | None = None,
+        data: TranscriptionWebhook | None = None,
         status: str | None = None,
+        token: str | None = Query(None),
     ) -> dict:
         """Handle chunk transcription webhook."""
+        verify_webhook_request(uid=uid, token=token)
         item: TranscribeTask = await self.get_item(
             uid, user_id=None, ignore_user_id=True
         )

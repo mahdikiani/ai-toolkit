@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import tempfile
@@ -17,7 +18,17 @@ from .loader import Page
 logger = logging.getLogger(__name__)
 
 
+class PaddleOcrMissingError(RuntimeError):
+    """Raised when paddleocr is not installed for layout detection."""
+
+    def __init__(self) -> None:
+        """Initialize the error."""
+        super().__init__("paddleocr required for layout detection")
+
+
 class LayoutType(StrEnum):
+    """Semantic type of a detected layout element."""
+
     title = "title"
     heading = "heading"
     header = "header"
@@ -53,6 +64,8 @@ SPECIAL_TYPES = {LayoutType.formula, LayoutType.code}
 
 @dataclass
 class LayoutElement:
+    """A single detected element on a page, with its bounding boxes."""
+
     id: str
     page_id: str
     page_number: int
@@ -145,7 +158,8 @@ def _iou(
 def _containment_ratio(
     a: tuple[float, float, float, float], b: tuple[float, float, float, float]
 ) -> float:
-    """Intersection area over the smaller box's area.
+    """
+    Intersection area over the smaller box's area.
 
     Catches near-duplicate detections from the v2/v3 ensemble where one
     model's box is offset/padded differently from the other's — such pairs
@@ -163,6 +177,7 @@ def deduplicate_by_iou(
     iou_threshold: float = 0.40,
     containment_threshold: float = 0.70,
 ) -> list[LayoutElement]:
+    """Handle deduplicate_by_iou."""
     if len(elements) <= 1:
         return elements
     sorted_elems = sorted(
@@ -210,12 +225,15 @@ class LayoutDetector:
         iou_threshold: float = 0.40,
         crop_dir: str | Path | None = None,
     ) -> None:
+        """Configure detection thresholds and the per-instance crop dir."""
         self.confidence_threshold = confidence_threshold
         self.padding_ratio = padding_ratio
         self.iou_threshold = iou_threshold
         # Per-instance temp dir (defaults to a fresh mkdtemp) so concurrent tasks
         # never collide on crop paths and can be cleaned up as a unit.
-        self.crop_dir = Path(crop_dir) if crop_dir else Path(tempfile.mkdtemp(prefix="di_crops_"))
+        self.crop_dir = (
+            Path(crop_dir) if crop_dir else Path(tempfile.mkdtemp(prefix="di_crops_"))
+        )
         self._models: dict[str, object] = {}
 
         self.stats: dict[str, list[float]] = {
@@ -223,9 +241,7 @@ class LayoutDetector:
             "elements_per_page": [],
         }
 
-    def detect_page(
-        self, image: Image.Image, page: Page
-    ) -> list[LayoutElement]:
+    def detect_page(self, image: Image.Image, page: Page) -> list[LayoutElement]:
         """Run detection and return layout elements with crops."""
         boxes_v2 = self._run_model(image, page, MODEL_NAMES[0])
         boxes_v3 = self._run_model(image, page, MODEL_NAMES[1])
@@ -236,14 +252,19 @@ class LayoutDetector:
         self.stats["elements_per_page"].append(len(all_elems))
         logger.debug(
             "Page %d: v2=%d, v3=%d, total=%d",
-            page.page_number, len(boxes_v2), len(boxes_v3), len(all_elems),
+            page.page_number,
+            len(boxes_v2),
+            len(boxes_v3),
+            len(all_elems),
         )
 
         for elem in all_elems:
-            crop = image.crop(
-                (int(elem.padded_bbox[0]), int(elem.padded_bbox[1]),
-                 int(elem.padded_bbox[2]), int(elem.padded_bbox[3]))
-            )
+            crop = image.crop((
+                int(elem.padded_bbox[0]),
+                int(elem.padded_bbox[1]),
+                int(elem.padded_bbox[2]),
+                int(elem.padded_bbox[3]),
+            ))
             page_crop_dir = self.crop_dir / elem.page_id
             page_crop_dir.mkdir(parents=True, exist_ok=True)
             crop_path = page_crop_dir / f"{elem.id}.png"
@@ -278,22 +299,21 @@ class LayoutDetector:
             payload = getattr(result, "json", None)
             if callable(payload):
                 payload = payload()
-            elements = self._parse_output(
-                payload, page, model_name
+            elements = self._parse_output(payload, page, model_name)
+        except Exception:
+            logger.debug(
+                "%s failed for page %d", model_name, page.page_number, exc_info=True
             )
+            return []
+        else:
             self.stats["detect_time"].append(time.time() - t0)
             return elements
-        except Exception:
-            logger.debug("%s failed for page %d", model_name, page.page_number, exc_info=True)
-            return []
         finally:
             if temp_path:
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(temp_path)
-                except OSError:
-                    pass
 
-    def _get_model(self, model_name: str):
+    def _get_model(self, model_name: str) -> object:
         """Lazy-init and cache layout models."""
         if model_name in self._models:
             return self._models[model_name]
@@ -304,10 +324,11 @@ class LayoutDetector:
                 model_name=model_name,
                 engine_config={"enable_mkldnn": False, "cpu_threads": 2},
             )
+        except ImportError as exc:
+            raise PaddleOcrMissingError from exc
+        else:
             self._models[model_name] = model
             return model
-        except ImportError as exc:
-            raise RuntimeError("paddleocr required for layout detection") from exc
 
     def _parse_output(
         self, result: object, page: Page, source: str
@@ -335,7 +356,9 @@ class LayoutDetector:
                 item.get("block_label") or item.get("type") or item.get("label") or ""
             )
             elem_type = LABEL_MAP.get(str(raw_label), LayoutType.unknown)
-            bbox_raw = item.get("block_bbox") or item.get("bbox") or item.get("coordinate")
+            bbox_raw = (
+                item.get("block_bbox") or item.get("bbox") or item.get("coordinate")
+            )
             if isinstance(bbox_raw, (list, tuple)) and len(bbox_raw) == 4:
                 x1, y1, x2, y2 = bbox_raw
             elif isinstance(bbox_raw, dict):
@@ -367,6 +390,7 @@ class LayoutDetector:
         return elements
 
     def log_stats(self) -> None:
+        """Log average detection time and total element count."""
         if self.stats["detect_time"]:
             logger.info(
                 "Layout: avg=%.2fs, total elements=%d",
@@ -382,4 +406,5 @@ class LayoutDetector:
 
 
 def load_layout_detector(confidence_threshold: float = 0.5) -> LayoutDetector:
+    """Build a LayoutDetector with the given confidence threshold."""
     return LayoutDetector(confidence_threshold=confidence_threshold)

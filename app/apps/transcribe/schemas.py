@@ -7,7 +7,7 @@ from io import BytesIO
 
 from fastapi import Form
 from fastapi_mongo_base.core.exceptions import BaseHTTPException
-from fastapi_mongo_base.schemas import UserOwnedEntitySchema
+from fastapi_mongo_base.schemas import TenantUserEntitySchema
 from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import BaseModel, Field
 
@@ -133,7 +133,7 @@ class TranscribeTaskBase64Schema(TaskCreateFieldsMixin):
 
 
 class TranscribeTaskSchema(
-    UserOwnedEntitySchema, TaskMixin, TranscribeTaskSchemaCreate
+    TenantUserEntitySchema, TaskMixin, TranscribeTaskSchemaCreate
 ):
     """Complete transcription task schema including result and chunk metadata."""
 

@@ -12,8 +12,18 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 
 
+class AssetSourceNotFoundError(FileNotFoundError):
+    """Raised when an OCR asset source path does not exist."""
+
+    def __init__(self, source: object) -> None:
+        """Initialize the error."""
+        super().__init__(f"Asset source not found: {source}")
+
+
 @dataclass
 class Asset:
+    """A visual asset (image/chart/figure) extracted from a document."""
+
     id: str
     original_element_id: str
     filename: str
@@ -28,15 +38,18 @@ class AssetManager:
     """Manages extraction and storage of visual assets."""
 
     def __init__(self, output_dir: str | Path) -> None:
+        """Prepare the assets output directory under *output_dir*."""
         self.output_dir = Path(output_dir)
         self.assets_dir = self.output_dir / "assets"
         self.assets_dir.mkdir(parents=True, exist_ok=True)
         self._assets: list[Asset] = []
 
-    def save_image(self, image: Image.Image, element_id: str, type: str = "image") -> Asset:
+    def save_image(
+        self, image: Image.Image, element_id: str, asset_type: str = "image"
+    ) -> Asset:
         """Save an image asset and return Asset record."""
         asset_id = str(uuid.uuid4())[:8]
-        filename = f"{type}_{asset_id}.png"
+        filename = f"{asset_type}_{asset_id}.png"
         path = self.assets_dir / filename
         image.save(path, "PNG")
 
@@ -49,20 +62,23 @@ class AssetManager:
             rel_path=rel,
             width=image.width,
             height=image.height,
-            type=type,
+            type=asset_type,
         )
         self._assets.append(asset)
         return asset
 
-    def copy_asset(self, source_path: str | Path, element_id: str, type: str = "image") -> Asset:
+    def copy_asset(
+        self, source_path: str | Path, element_id: str, asset_type: str = "image"
+    ) -> Asset:
         """Copy an existing file as an asset."""
         source = Path(source_path)
         if not source.exists():
-            raise FileNotFoundError(f"Asset source not found: {source}")
+            raise AssetSourceNotFoundError(source)
         image = Image.open(source)
-        return self.save_image(image, element_id, type)
+        return self.save_image(image, element_id, asset_type)
 
     def get_assets(self) -> list[Asset]:
+        """Return a shallow copy of all recorded assets."""
         return list(self._assets)
 
     def get_asset_map(self) -> dict[str, str]:

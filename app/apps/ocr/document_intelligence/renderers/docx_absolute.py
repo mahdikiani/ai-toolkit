@@ -64,8 +64,10 @@ MIN_BOX_HEIGHT_IN = 0.15
 
 def render_docx_absolute(ast: DocumentAST, pdf_data: bytes | None = None) -> BytesIO:
     """
-    Render DocumentAST to .docx with every element absolutely positioned
-    at its source-page bbox, reconstructing the original page layout."""
+    Render DocumentAST to .docx with every element absolutely positioned.
+
+    at its source-page bbox, reconstructing the original page layout.
+    """
     font_cs, font_latin = _resolve_fonts(pdf_data)
     page_width_in, page_height_in = _resolve_page_size(ast)
     margin_in = _resolve_margin(page_width_in)
@@ -108,8 +110,10 @@ def render_docx_absolute(ast: DocumentAST, pdf_data: bytes | None = None) -> Byt
 
 def _setup_minimal_style(doc: Document, font_cs: str, font_latin: str) -> None:
     """
-    Set the document's base font; per-box formatting is applied inline
-    since each box is independent XML, not a shared paragraph style."""
+    Set the document's base font; per-box formatting is applied inline.
+
+    since each box is independent XML, not a shared paragraph style.
+    """
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
@@ -122,15 +126,13 @@ def _setup_minimal_style(doc: Document, font_cs: str, font_latin: str) -> None:
     rpr.append(rfonts)
 
 
-def _page_break_xml():
-    return parse_xml(
-        f'<w:p {nsdecls("w")}><w:r><w:br w:type="page"/></w:r></w:p>'
-    )
+def _page_break_xml() -> object:
+    return parse_xml(f'<w:p {nsdecls("w")}><w:r><w:br w:type="page"/></w:r></w:p>')
 
 
 def _render_page_absolute(
     doc: Document,
-    body,
+    body: object,
     page: PageAST,
     font_cs: str,
     font_latin: str,
@@ -140,7 +142,12 @@ def _render_page_absolute(
         if node.type in (LayoutType.header, LayoutType.footer):
             continue  # promoted to real Word header/footer, see _collect_header_footer
         xml = _render_node_absolute(
-            doc, node, page, font_cs, font_latin, include_shapetype=not shape_type_emitted
+            doc,
+            node,
+            page,
+            font_cs,
+            font_latin,
+            include_shapetype=not shape_type_emitted,
         )
         if xml is not None:
             body.append(xml)
@@ -183,26 +190,42 @@ def _node_inner_xml(
 ) -> str | None:
     if node.type == LayoutType.title:
         return _paragraph_xml(
-            node.text, bold=True, size_pt=16, font_cs=font_cs, font_latin=font_latin,
-            width_in=width_in, height_in=height_in,
+            node.text,
+            bold=True,
+            size_pt=16,
+            font_cs=font_cs,
+            font_latin=font_latin,
+            width_in=width_in,
+            height_in=height_in,
         )
     if node.type == LayoutType.heading:
         return _paragraph_xml(
-            node.text, bold=True, size_pt=13, font_cs=font_cs, font_latin=font_latin,
-            width_in=width_in, height_in=height_in,
+            node.text,
+            bold=True,
+            size_pt=13,
+            font_cs=font_cs,
+            font_latin=font_latin,
+            width_in=width_in,
+            height_in=height_in,
         )
     if node.type in (LayoutType.paragraph, LayoutType.reference):
         return _paragraph_xml(
-            node.text, font_cs=font_cs, font_latin=font_latin,
-            width_in=width_in, height_in=height_in,
+            node.text,
+            font_cs=font_cs,
+            font_latin=font_latin,
+            width_in=width_in,
+            height_in=height_in,
         )
     if node.type == LayoutType.list:
         items = node.children or [node]
         per_item_height = height_in / max(1, len(items))
         return "".join(
             _paragraph_xml(
-                f"• {c.text}", font_cs=font_cs, font_latin=font_latin,
-                width_in=width_in, height_in=per_item_height,
+                f"• {c.text}",
+                font_cs=font_cs,
+                font_latin=font_latin,
+                width_in=width_in,
+                height_in=per_item_height,
             )
             for c in items
         )
@@ -212,8 +235,12 @@ def _node_inner_xml(
         return _formula_xml(node.latex, font_cs, font_latin)
     if node.type == LayoutType.code:
         return _paragraph_xml(
-            node.text, font_latin="Courier New", font_cs="Courier New", size_pt=9,
-            width_in=width_in, height_in=height_in,
+            node.text,
+            font_latin="Courier New",
+            font_cs="Courier New",
+            size_pt=9,
+            width_in=width_in,
+            height_in=height_in,
         )
     return None
 
@@ -229,12 +256,16 @@ _LINE_HEIGHT_FACTOR = 1.25  # rough line height ≈ factor * size(pt) / 72in
 MIN_AUTOFIT_SIZE_PT = 6
 
 
-def _autofit_size_pt(text: str, width_in: float, height_in: float, base_size_pt: int) -> int:
+def _autofit_size_pt(
+    text: str, width_in: float, height_in: float, base_size_pt: int
+) -> int:
     """
-    Shrink the font size so wrapped text is more likely to fit inside its
+    Shrink the font size so wrapped text is more likely to fit inside its.
+
     box height, reducing (not fully eliminating — this is a rough
     proportional-font estimate, not real text layout) overlap with
-    neighboring boxes positioned right below/beside it."""
+    neighboring boxes positioned right below/beside it.
+    """
     if not text or width_in <= 0 or height_in <= 0:
         return base_size_pt
     for size in range(base_size_pt, MIN_AUTOFIT_SIZE_PT - 1, -1):
@@ -261,7 +292,10 @@ def _paragraph_xml(
         size_pt = _autofit_size_pt(text, width_in, height_in, size_pt)
     rfonts = ""
     if font_cs or font_latin:
-        rfonts = f'<w:rFonts w:ascii="{font_latin}" w:hAnsi="{font_latin}" w:cs="{font_cs}"/>'
+        rfonts = (
+            f'<w:rFonts w:ascii="{font_latin}" w:hAnsi="{font_latin}" '
+            f'w:cs="{font_cs}"/>'
+        )
     bold_xml = "<w:b/><w:bCs/>" if bold else ""
     # No <w:rtl/> on the run — tested both ways via LibreOffice rendering and
     # it made no visible difference to the bidi-wrap ordering bug. The actual
@@ -299,31 +333,40 @@ def _table_xml(node: ASTNode) -> str:
                 f'<w:r><w:rPr><w:sz w:val="18"/>{_LANG_XML}</w:rPr>'
                 f'<w:t xml:space="preserve">{text}</w:t></w:r></w:p></w:tc>'
             )
-        rows_xml.append(f'<w:tr>{"".join(cells)}</w:tr>')
-    return f'<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid>{grid}</w:tblGrid>{"".join(rows_xml)}</w:tbl>'
+        rows_xml.append(f"<w:tr>{''.join(cells)}</w:tr>")
+    return (
+        '<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>'
+        f'<w:tblGrid>{grid}</w:tblGrid>{"".join(rows_xml)}</w:tbl>'
+    )
 
 
 def _formula_xml(latex: str, font_cs: str, font_latin: str) -> str:
     try:
         omath = latex_to_omml(latex)
-        return f'<w:p><w:pPr><w:jc w:val="center"/></w:pPr>{omath}</w:p>'
     except LatexConversionError:
-        logger.warning("Formula LaTeX->OMML conversion failed, using text fallback: %r", latex)
+        logger.warning(
+            "Formula LaTeX->OMML conversion failed, using text fallback: %r", latex
+        )
         rfonts = f'<w:rFonts w:ascii="{FONT_MATH}" w:hAnsi="{FONT_MATH}"/>'
         return (
             '<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
-            f'<w:r><w:rPr>{rfonts}<w:i/></w:rPr>'
+            f"<w:r><w:rPr>{rfonts}<w:i/></w:rPr>"
             f'<w:t xml:space="preserve">{_escape(latex)}</w:t></w:r></w:p>'
         )
+    else:
+        return f'<w:p><w:pPr><w:jc w:val="center"/></w:pPr>{omath}</w:p>'
 
 
 def _textbox_shape_xml(
-    bbox: tuple[float, float, float, float], page: PageAST, inner_xml: str, include_shapetype: bool
-):
+    bbox: tuple[float, float, float, float],
+    page: PageAST,
+    inner_xml: str,
+    include_shapetype: bool,
+) -> object:
     left, top, width, height = _bbox_to_inches(bbox, page)
     shapetype = _SHAPE_TYPE_XML if include_shapetype else ""
     xml = (
-        f'<w:p {nsdecls("w")} {_VML_NS} {_O_NS} {_R_NS} {_M_NS}>'
+        f"<w:p {nsdecls('w')} {_VML_NS} {_O_NS} {_R_NS} {_M_NS}>"
         "<w:r><w:pict>"
         f"{shapetype}"
         f'<v:shape type="#_x0000_t202_di" style="position:absolute;'
@@ -337,7 +380,9 @@ def _textbox_shape_xml(
     return parse_xml(xml)
 
 
-def _image_shape_xml(doc: Document, node: ASTNode, page: PageAST, include_shapetype: bool):
+def _image_shape_xml(
+    doc: Document, node: ASTNode, page: PageAST, include_shapetype: bool
+) -> object:
     asset_path = node.asset_path
     if not asset_path or not Path(asset_path).exists():
         return None
@@ -351,7 +396,7 @@ def _image_shape_xml(doc: Document, node: ASTNode, page: PageAST, include_shapet
     left, top, width, height = _bbox_to_inches(node.bbox, page)
     shapetype = _SHAPE_TYPE_XML if include_shapetype else ""
     xml = (
-        f'<w:p {nsdecls("w")} {_VML_NS} {_O_NS} {_R_NS}>'
+        f"<w:p {nsdecls('w')} {_VML_NS} {_O_NS} {_R_NS}>"
         "<w:r><w:pict>"
         f"{shapetype}"
         f'<v:shape style="position:absolute;left:{left:.3f}in;top:{top:.3f}in;'

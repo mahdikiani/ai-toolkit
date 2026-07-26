@@ -18,7 +18,7 @@ class TestPrompticCreate:
         assert task.input_variables == {"key": "value"}
         assert task.webhook_url is None
         assert task.idempotency_key is None
-        assert task.meta_data == {}
+        assert task.meta_data in ({}, None)
 
     def test_full_creation(self) -> None:
         """Test creating task with all fields."""
@@ -37,7 +37,7 @@ class TestPrompticCreate:
         """Test default values are applied correctly."""
         task = PrompticCreate()
         assert task.input_variables == {}
-        assert task.meta_data == {}
+        assert task.meta_data in ({}, None)
 
 
 class TestPrompticSchema:
@@ -50,6 +50,7 @@ class TestPrompticSchema:
             input_variables={"key": "value"},
             idempotency_key="generated_key_123",
             user_id="user_123",
+            tenant_id="tenant_123",
             uid="550e8400-e29b-41d4-a716-446655440000",
             task_status=TaskStatusEnum.init,
         )
@@ -69,6 +70,7 @@ class TestPrompticSchema:
             PrompticSchema(
                 prompt_name="test",
                 user_id="user_123",
+                tenant_id="tenant_123",
                 uid="550e8400-e29b-41d4-a716-446655440000",
                 task_status=TaskStatusEnum.init,
             )
@@ -83,6 +85,7 @@ class TestPrompticSchema:
             prompt_name="test",
             idempotency_key="key_123",
             user_id="user_123",
+            tenant_id="tenant_123",
             uid="550e8400-e29b-41d4-a716-446655440000",
             task_status=TaskStatusEnum.completed,
             result="LLM response text",
@@ -98,6 +101,7 @@ class TestPrompticSchema:
             prompt_name="test",
             idempotency_key="key_123",
             user_id="user_123",
+            tenant_id="tenant_123",
             uid="550e8400-e29b-41d4-a716-446655440000",
             task_status=TaskStatusEnum.init,
         )

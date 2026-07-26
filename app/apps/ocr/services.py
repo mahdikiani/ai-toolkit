@@ -5,8 +5,6 @@ import logging
 from io import BytesIO
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
 from server.config import Settings
@@ -24,6 +22,8 @@ from .no_ocr_services import process_direct_file
 from .ocr_services import prepare_pages, process_pages_batch
 from .paddle_ocr_services import process_pages_with_paddle
 from .schemas import OcrEngineType
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_ocr_engine(task: OcrTask) -> OcrEngineType:
@@ -54,31 +54,35 @@ _EXTENSION_BY_MIME = {
 
 
 async def process_ocr(task: OcrTask) -> OcrTask:
-    """Process an OCR task and extract text from the uploaded file."""
+    """
+    Process an OCR task and extract text from the uploaded file.
+
+    Engine selection (request field wins, else ``Settings.ocr_engine``
+    / ``OCR_ENGINE``):
+
+    - ``pipeline`` — layout detection + VLM element extraction
+    - ``document_intelligence`` — AST pipeline with DOCX/OMML output
+    - legacy: ``llm``, ``paddle`` / ``paddleocr_vl_1_5``
+    """
     try:
         file_content = await task.file_content()
         file_type = mime.check_file_type(file_content)
 
-        # Compressed archive processing
         if is_compressed_file(file_type):
             return await process_compressed_archive(task, file_content, file_type)
 
-        # Direct file processing (DOCX, PPTX)
         if not is_ocr_required(file_type):
             result = process_direct_file(file_content, file_type)
             return await save_result(task, result)
 
         engine = _resolve_ocr_engine(task)
-
-        # Modern pipeline engine: layout detection + structured extraction
-        if engine == OcrEngineType.pipeline:
-            return await _process_with_pipeline(task, file_content, file_type, engine)
-
-        # Document Intelligence engine: AST-based, real DOCX tables/OMML/headers
-        if engine == OcrEngineType.document_intelligence:
-            return await _process_with_document_intelligence(
-                task, file_content, file_type, engine
-            )
+        dispatch = {
+            OcrEngineType.pipeline: _process_with_pipeline,
+            OcrEngineType.document_intelligence: _process_with_document_intelligence,
+        }
+        handler = dispatch.get(engine)
+        if handler is not None:
+            return await handler(task, file_content, file_type, engine)
 
         # Legacy engines (LLM, Paddle)
         pages = prepare_pages(file_content, file_type)
@@ -129,6 +133,60 @@ async def process_ocr(task: OcrTask) -> OcrTask:
         return await save_error(task, f"OCR processing failed: {exc}")
 
 
+async def _upload_pipeline_assets_and_docx(
+    pipeline: object,
+    result: str,
+    file_content: BytesIO,
+    file_type: str,
+) -> tuple[str, str | None]:
+    """Upload visual assets, rewrite placeholders, and build a DOCX upload URL."""
+    from PIL import Image
+
+    from utils.integrations.media import upload_file
+
+    from .pipeline.docx_renderer import build_docx
+    from .pipeline.renderer import render_pdf_bytes
+
+    docx_url: str | None = None
+    uploaded_assets: dict[str, str] = {}
+    try:
+        assets = pipeline.get_assets()
+        for asset in assets:
+            try:
+                buf = BytesIO(asset["image_bytes"])
+                buf.seek(0)
+                url = await upload_file(buf)
+                if url:
+                    uploaded_assets[asset["id"]] = url
+            except Exception:
+                logger.exception("Failed to upload asset %s", asset["id"])
+
+        if uploaded_assets:
+            for asset_id, url in uploaded_assets.items():
+                result = result.replace(f"({asset_id})", f"({url})")
+
+        page_images: list[Image.Image] = []
+        if file_type == "application/pdf":
+            file_content.seek(0)
+            page_images = render_pdf_bytes(file_content, dpi=150)
+        file_content.seek(0)
+        pdf_data = file_content.read() if file_type == "application/pdf" else None
+        docx_buf = build_docx(
+            result,
+            page_images=page_images,
+            elements=pipeline.get_elements(),
+            page_headers=pipeline.get_headers(),
+            page_footers=pipeline.get_footers(),
+            crops=pipeline.get_all_crops(),
+            pdf_data=pdf_data,
+        )
+        docx_buf.seek(0)
+        docx_url = await upload_file(docx_buf)
+    except Exception:
+        logger.exception("DOCX generation / asset upload failed")
+    return result, docx_url
+
+
 async def _process_with_pipeline(
     task: OcrTask,
     file_content: BytesIO,
@@ -165,51 +223,9 @@ async def _process_with_pipeline(
     else:
         result = await pipeline.process_image_bytes(file_content)
 
-    # Upload accumulated visual assets and replace asset:ID placeholders
-    docx_url: str | None = None
-    uploaded_assets: dict[str, str] = {}
-    try:
-        from PIL import Image
-
-        from utils.integrations.media import upload_file
-
-        from .pipeline.docx_renderer import build_docx
-        from .pipeline.renderer import render_pdf_bytes
-
-        assets = pipeline.get_assets()
-        for asset in assets:
-            try:
-                buf = BytesIO(asset["image_bytes"])
-                buf.seek(0)
-                url = await upload_file(buf)
-                if url:
-                    uploaded_assets[asset["id"]] = url
-            except Exception:
-                logger.exception("Failed to upload asset %s", asset["id"])
-
-        if uploaded_assets:
-            for asset_id, url in uploaded_assets.items():
-                result = result.replace(f"({asset_id})", f"({url})")
-
-        page_images: list[Image.Image] = []
-        if file_type == "application/pdf":
-            file_content.seek(0)
-            page_images = render_pdf_bytes(file_content, dpi=150)
-        file_content.seek(0)
-        pdf_data = file_content.read() if file_type == "application/pdf" else None
-        docx_buf = build_docx(
-            result,
-            page_images=page_images,
-            elements=pipeline.get_elements(),
-            page_headers=pipeline.get_headers(),
-            page_footers=pipeline.get_footers(),
-            crops=pipeline.get_all_crops(),
-            pdf_data=pdf_data,
-        )
-        docx_buf.seek(0)
-        docx_url = await upload_file(docx_buf)
-    except Exception:
-        logger.exception("DOCX generation / asset upload failed")
+    result, docx_url = await _upload_pipeline_assets_and_docx(
+        pipeline, result, file_content, file_type
+    )
 
     amount = finance.estimate_ocr_cost(pages=page_count, engine=engine.value)
     usage = await finance.meter_cost(
@@ -314,7 +330,10 @@ async def _process_with_document_intelligence(
         "pipeline": "document_intelligence_v1",
         "model": Settings.ocr_vlm_model,
         "usage": {"pages": page_count},
-        "stats": summarize_stats(result.stats, include_elements=Settings.ocr_di_output_debug),
+        "stats": summarize_stats(
+            result.stats,
+            include_elements=Settings.ocr_di_output_debug,
+        ),
     }
     if docx_url:
         provider_meta["docx_url"] = docx_url

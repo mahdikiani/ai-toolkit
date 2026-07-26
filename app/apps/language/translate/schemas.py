@@ -1,11 +1,11 @@
 """Translation task schemas and data models."""
 
-from fastapi_mongo_base.schemas import UserOwnedEntitySchema
-from fastapi_mongo_base.tasks import TaskMixin
-from pydantic import BaseModel, Field
+from fastapi_mongo_base.schemas import TenantUserEntitySchema
+from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
+from pydantic import Field
 
 
-class TranslateSchemaCreate(BaseModel):
+class TranslateSchemaCreate(TaskCreateFieldsMixin):
     """Schema for creating a new translation task."""
 
     text: str
@@ -13,10 +13,9 @@ class TranslateSchemaCreate(BaseModel):
         default="Persian",
         description="Target language for the translation",
     )
-    user_id: str | None = None
 
 
-class TranslateSchema(UserOwnedEntitySchema, TaskMixin, TranslateSchemaCreate):
+class TranslateSchema(TenantUserEntitySchema, TaskMixin, TranslateSchemaCreate):
     """Complete translation task schema including result and usage fields."""
 
     result: str | None = None

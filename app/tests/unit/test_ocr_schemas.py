@@ -1,7 +1,7 @@
 """Unit tests for OCR schemas."""
 
 import base64
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -50,15 +50,11 @@ class TestOcrTaskSchemaCreate:
 
         schema = OcrTaskSchemaCreate(file_url="https://example.com/file.pdf")
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_response = MagicMock()
-            mock_response.content = b"pdf content"
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
-
+        with patch(
+            "apps.ocr.schemas.download_bytes",
+            new_callable=AsyncMock,
+            return_value=__import__("io").BytesIO(b"pdf content"),
+        ):
             content = await schema.file_content()
             assert content.read() == b"pdf content"
 
@@ -170,6 +166,7 @@ class TestOcrTaskSchema:
         schema = OcrTaskSchema(
             uid="task_123",
             user_id="user_123",
+            tenant_id="tenant_123",
             file_url="https://example.com/file.pdf",
         )
 

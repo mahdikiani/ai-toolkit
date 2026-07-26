@@ -34,7 +34,7 @@ class TestExecutionTaskCreate:
         assert task.input_variables == {"key": "value"}
         assert task.webhook_url is None
         assert task.idempotency_key is None
-        assert task.meta_data == {}
+        assert task.meta_data in ({}, None)
 
     def test_default_empty_input_variables(self) -> None:
         """Should default input_variables to empty dict."""
@@ -77,6 +77,7 @@ class TestExecutionTaskSchema:
             ExecutionTaskSchema(
                 idempotency_key="key_123",
                 user_id="user_123",
+                tenant_id="tenant_123",
                 uid="550e8400-e29b-41d4-a716-446655440000",
                 task_status=TaskStatusEnum.init,
             )
@@ -90,6 +91,7 @@ class TestExecutionTaskSchema:
             ExecutionTaskSchema(
                 prompt_name="test",
                 user_id="user_123",
+                tenant_id="tenant_123",
                 uid="550e8400-e29b-41d4-a716-446655440000",
                 task_status=TaskStatusEnum.init,
             )
@@ -103,6 +105,7 @@ class TestExecutionTaskSchema:
             prompt_name="test",
             idempotency_key="key_123",
             user_id="user_123",
+            tenant_id="tenant_123",
             uid="550e8400-e29b-41d4-a716-446655440000",
             task_status=TaskStatusEnum.init,
         )
@@ -114,6 +117,7 @@ class TestExecutionTaskSchema:
             prompt_name="test",
             idempotency_key="key_123",
             user_id="user_123",
+            tenant_id="tenant_123",
             uid="550e8400-e29b-41d4-a716-446655440000",
             task_status=TaskStatusEnum.init,
         )

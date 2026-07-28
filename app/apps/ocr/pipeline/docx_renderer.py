@@ -17,7 +17,7 @@ from PIL import Image as PILImage
 
 logger = logging.getLogger(__name__)
 
-FONT_PERSIAN = "B Nazanin"
+FONT_PERSIAN = "IRNazanin"
 FONT_LATIN = "Calibri"
 
 
@@ -101,10 +101,10 @@ def _clean_font_name(name: str) -> str | None:
     # Common font name mappings
     name_lower = cleaned.lower()
     mappings = {
-        "niloofar": "B Nazanin",
-        "b nazanin": "B Nazanin",
-        "bnazanin": "B Nazanin",
-        "nazanin": "B Nazanin",
+        "niloofar": "IRNazanin",
+        "b nazanin": "IRNazanin",
+        "bnazanin": "IRNazanin",
+        "nazanin": "IRNazanin",
         "lotus": "B Lotus",
         "mitra": "B Mitra",
         "yekan": "B Yekan",

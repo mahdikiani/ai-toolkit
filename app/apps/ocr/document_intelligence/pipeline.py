@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
+from typing import Literal
 
 from PIL import Image
 
@@ -28,8 +29,13 @@ from .elements import ElementProcessor, ProcessedElement
 from .layout import VISUAL_TYPES, LayoutDetector, LayoutElement, LayoutType
 from .loader import Document, Page, load_document
 from .reading_order import ReadingOrderResolver
+from .renderers.docx import render_docx
 from .renderers.docx_absolute import render_docx_absolute
 from .renderers.markdown import render_markdown
+from .structure.paragraph_merge import merge_paragraphs
+from .structure.table_continuation import merge_table_continuations
+
+DocxMode = Literal["semantic", "visual"]
 
 logger = logging.getLogger(__name__)
 
@@ -147,8 +153,20 @@ class DocumentIntelligencePipeline:
             else Settings.ocr_di_max_concurrent_vlm
         )
 
-    async def process(self, file_bytes: BytesIO, filename: str) -> PipelineResult:
-        """Run the full pipeline on a PDF/image and return markdown + docx + assets."""
+    async def process(
+        self, file_bytes: BytesIO, filename: str, mode: DocxMode = "semantic"
+    ) -> PipelineResult:
+        """
+        Run the full pipeline on a PDF/image and return markdown + docx + assets.
+
+        ``mode="semantic"`` (default) produces a flowing, fully-editable Word
+        document built from real Paragraph/Heading/Table/Section objects —
+        no Text Box or Shape for normal content. ``mode="visual"`` instead
+        reproduces the source page's visual layout by placing each element
+        in an absolutely-positioned floating text box; it trades editability
+        for closer visual fidelity and is meant for forms/brochures, not as
+        the default output.
+        """
         t_start = time.time()
         file_bytes.seek(0)
         file_bytes.name = filename
@@ -163,10 +181,22 @@ class DocumentIntelligencePipeline:
 
         asset_map = {a.path: a.rel_path for a in self.asset_manager.get_assets()}
         document_ast = build_document_ast(page_asts, asset_map)
+        # Merge adjacent same-page paragraph blocks that are really one
+        # paragraph split by layout detection, before any renderer sees
+        # them -- see structure/paragraph_merge.py.
+        document_ast = merge_paragraphs(document_ast)
+        # Merge a table cut off at the bottom of one page with its
+        # continuation at the top of the next into one logical table --
+        # see structure/table_continuation.py.
+        document_ast = merge_table_continuations(document_ast)
 
         t_render = time.time()
         markdown = render_markdown(document_ast)
-        docx_buf = render_docx_absolute(document_ast, pdf_data=document.pdf_data)
+        docx_buf = (
+            render_docx(document_ast, pdf_data=document.pdf_data)
+            if mode == "semantic"
+            else render_docx_absolute(document_ast, pdf_data=document.pdf_data)
+        )
         render_time = time.time() - t_render
 
         docx_bytes = docx_buf.getvalue()
@@ -209,8 +239,17 @@ class DocumentIntelligencePipeline:
         ordered = self.reading_order.resolve(
             list(layout_elements), page.width, texts=texts
         )
+        column_count = self.reading_order.detect_column_count(
+            list(layout_elements), page.width
+        )
         page_ast = build_ast(
-            processed, ordered, page.page_number, page.width, page.height, page.dpi
+            processed,
+            ordered,
+            page.page_number,
+            page.width,
+            page.height,
+            page.dpi,
+            column_count=column_count,
         )
 
         elem_stats = [

@@ -98,7 +98,14 @@ def render_docx_absolute(ast: DocumentAST, pdf_data: bytes | None = None) -> Byt
         if prev_page > 0 and page.page_number > prev_page:
             body.append(_page_break_xml())
         shape_type_emitted = _render_page_absolute(
-            doc, body, page, font_cs, font_latin, shape_type_emitted
+            doc,
+            body,
+            page,
+            font_cs,
+            font_latin,
+            shape_type_emitted,
+            header_promoted=bool(header_text),
+            footer_promoted=bool(footer_text),
         )
         prev_page = page.page_number
 
@@ -137,10 +144,14 @@ def _render_page_absolute(
     font_cs: str,
     font_latin: str,
     shape_type_emitted: bool,
+    header_promoted: bool = True,
+    footer_promoted: bool = True,
 ) -> bool:
     for node in page.nodes:
-        if node.type in (LayoutType.header, LayoutType.footer):
-            continue  # promoted to real Word header/footer, see _collect_header_footer
+        if node.type == LayoutType.header and header_promoted:
+            continue  # promoted to real Word header, see _collect_header_footer
+        if node.type == LayoutType.footer and footer_promoted:
+            continue  # promoted to real Word footer, see _collect_header_footer
         xml = _render_node_absolute(
             doc,
             node,
@@ -185,36 +196,35 @@ def _render_node_absolute(
     return _textbox_shape_xml(node.bbox, page, inner, include_shapetype)
 
 
+# Node types rendered as a plain paragraph box, keyed to the bold/size_pt
+# overrides that distinguish them -- LayoutType.header/footer are only
+# reached here when not promoted to a real section header/footer (see
+# _render_page_absolute); page-specific text still needs a box.
+_SIMPLE_PARAGRAPH_KWARGS: dict[LayoutType, dict[str, object]] = {
+    LayoutType.title: {"bold": True, "size_pt": 16},
+    LayoutType.heading: {"bold": True, "size_pt": 13},
+    LayoutType.paragraph: {},
+    LayoutType.reference: {},
+    LayoutType.header: {},
+    LayoutType.footer: {},
+    LayoutType.table_caption: {"size_pt": 9},
+    LayoutType.table_footnote: {"size_pt": 9},
+    LayoutType.figure_caption: {"size_pt": 9},
+    LayoutType.unknown: {},
+}
+
+
 def _node_inner_xml(
     node: ASTNode, font_cs: str, font_latin: str, width_in: float, height_in: float
 ) -> str | None:
-    if node.type == LayoutType.title:
-        return _paragraph_xml(
-            node.text,
-            bold=True,
-            size_pt=16,
-            font_cs=font_cs,
-            font_latin=font_latin,
-            width_in=width_in,
-            height_in=height_in,
-        )
-    if node.type == LayoutType.heading:
-        return _paragraph_xml(
-            node.text,
-            bold=True,
-            size_pt=13,
-            font_cs=font_cs,
-            font_latin=font_latin,
-            width_in=width_in,
-            height_in=height_in,
-        )
-    if node.type in (LayoutType.paragraph, LayoutType.reference):
+    if node.type in _SIMPLE_PARAGRAPH_KWARGS:
         return _paragraph_xml(
             node.text,
             font_cs=font_cs,
             font_latin=font_latin,
             width_in=width_in,
             height_in=height_in,
+            **_SIMPLE_PARAGRAPH_KWARGS[node.type],
         )
     if node.type == LayoutType.list:
         items = node.children or [node]
@@ -336,7 +346,7 @@ def _table_xml(node: ASTNode) -> str:
         rows_xml.append(f"<w:tr>{''.join(cells)}</w:tr>")
     return (
         '<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>'
-        f'<w:tblGrid>{grid}</w:tblGrid>{"".join(rows_xml)}</w:tbl>'
+        f"<w:tblGrid>{grid}</w:tblGrid>{''.join(rows_xml)}</w:tbl>"
     )
 
 

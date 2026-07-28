@@ -97,7 +97,7 @@ class TestDocxRendererCoverage:
         assert dr._clean_font_name("AB") is None
         assert dr._clean_font_name("CMMI12") is None
         assert dr._clean_font_name("CMR10") is None
-        assert dr._clean_font_name("XB Niloofar") == "B Nazanin"
+        assert dr._clean_font_name("XB Niloofar") == "IRNazanin"
         assert dr._clean_font_name("TimesNewRoman") == "Times New Roman"
         assert dr._clean_font_name("WeirdFontName") is None
         assert dr._pick_cleaned_font({}) is None
@@ -450,9 +450,7 @@ class TestPrompticCliCoverage:
                     "sys.argv",
                     ["run", "-p", "p.yaml", "-i", "i.yaml", "-o", str(out)],
                 ),
-                patch(
-                    "apps.language.promptic.engine.run.PromptEngine"
-                ) as eng,
+                patch("apps.language.promptic.engine.run.PromptEngine") as eng,
                 patch(
                     "apps.language.promptic.engine.run.load_data",
                     return_value={"x": 1},
@@ -514,9 +512,7 @@ class TestPrompticCliCoverage:
                     "sys.argv",
                     ["gen", "-p", "p.yaml", "-i", "i.yaml", "-o", str(out)],
                 ),
-                patch(
-                    "apps.language.promptic.engine.generator.PromptEngine"
-                ) as eng,
+                patch("apps.language.promptic.engine.generator.PromptEngine") as eng,
                 patch(
                     "apps.language.promptic.engine.generator.load_data",
                     return_value={"x": 1},

@@ -57,6 +57,43 @@ class TestBuildAst:
         page_ast = build_ast([e1], ordered, page_number=1)
 
         assert page_ast.nodes[0].rows == [["A", "B"], ["1", "2"]]
+        assert page_ast.nodes[0].cell_merges == []
+
+    def test_table_colspan_preserved_as_cell_merge(self) -> None:
+        """
+        A colspan attribute must survive into `.cell_merges`, not be
+        stripped like a regex-based parser would."""
+        html = (
+            "<table>"
+            '<tr><td colspan="2">Header</td></tr>'
+            "<tr><td>A</td><td>B</td></tr>"
+            "</table>"
+        )
+        e1 = ProcessedElement(id="e1", type=LayoutType.table, text=html, html=html)
+        ordered = [_layout_elem("e1", LayoutType.table)]
+
+        page_ast = build_ast([e1], ordered, page_number=1)
+
+        assert page_ast.nodes[0].rows == [["Header", ""], ["A", "B"]]
+        assert page_ast.nodes[0].cell_merges == [(0, 0, 0, 1)]
+
+    def test_table_rowspan_preserved_as_cell_merge(self) -> None:
+        """
+        A rowspan attribute must survive into `.cell_merges` and the
+        spanned-over cell in the next row must not get its own <td>."""
+        html = (
+            "<table>"
+            '<tr><td rowspan="2">Name</td><td>A</td></tr>'
+            "<tr><td>B</td></tr>"
+            "</table>"
+        )
+        e1 = ProcessedElement(id="e1", type=LayoutType.table, text=html, html=html)
+        ordered = [_layout_elem("e1", LayoutType.table)]
+
+        page_ast = build_ast([e1], ordered, page_number=1)
+
+        assert page_ast.nodes[0].rows == [["Name", "A"], ["", "B"]]
+        assert page_ast.nodes[0].cell_merges == [(0, 0, 1, 0)]
 
     def test_list_text_split_into_children(self) -> None:
         """List nodes split their raw text into one child ASTNode per line."""
@@ -66,6 +103,30 @@ class TestBuildAst:
         page_ast = build_ast([e1], ordered, page_number=1)
 
         assert [c.text for c in page_ast.nodes[0].children] == ["one", "two", "three"]
+
+    def test_bullet_markers_stripped_and_not_flagged_as_ordered(self) -> None:
+        """
+        The OCR'd bullet glyph must not survive into the item text --
+        otherwise the renderer's own List Bullet style glyph would be
+        duplicated alongside a leftover "• "."""
+        e1 = ProcessedElement(id="e1", type=LayoutType.list, text="• first\n- second\n● third")
+        ordered = [_layout_elem("e1", LayoutType.list)]
+
+        page_ast = build_ast([e1], ordered, page_number=1)
+
+        children = page_ast.nodes[0].children
+        assert [c.text for c in children] == ["first", "second", "third"]
+        assert not any(c.ordered for c in children)
+
+    def test_numbered_markers_stripped_and_flagged_as_ordered(self) -> None:
+        e1 = ProcessedElement(id="e1", type=LayoutType.list, text="1. first\n2. second")
+        ordered = [_layout_elem("e1", LayoutType.list)]
+
+        page_ast = build_ast([e1], ordered, page_number=1)
+
+        children = page_ast.nodes[0].children
+        assert [c.text for c in children] == ["first", "second"]
+        assert all(c.ordered for c in children)
 
     def test_unmapped_element_falls_back_to_end(self) -> None:
         """A processed element missing from `ordered` sorts after ordered ones."""

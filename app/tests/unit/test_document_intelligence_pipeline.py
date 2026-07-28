@@ -19,6 +19,7 @@ from apps.ocr.document_intelligence.pipeline import (
     PipelineResult,
     summarize_stats,
 )
+from apps.ocr.document_intelligence.qa import run_docx_qa
 
 
 def _fake_detect_page(_self, image: Image.Image, page) -> list[LayoutElement]:
@@ -76,7 +77,7 @@ def _blank_image(width: int = 600, height: int = 800) -> BytesIO:
 class TestDocumentIntelligencePipeline:
     """End-to-end wiring test with layout/VLM mocked."""
 
-    async def _run(self) -> PipelineResult:
+    async def _run(self, mode: str = "semantic") -> PipelineResult:
         with (
             patch(
                 "apps.ocr.document_intelligence.layout.LayoutDetector.detect_page",
@@ -89,7 +90,7 @@ class TestDocumentIntelligencePipeline:
         ):
             pipeline = DocumentIntelligencePipeline(dpi=100)
             try:
-                return await pipeline.process(_blank_image(), "test.png")
+                return await pipeline.process(_blank_image(), "test.png", mode=mode)
             finally:
                 pipeline.cleanup()
 
@@ -102,14 +103,28 @@ class TestDocumentIntelligencePipeline:
         assert "assets/figure_" in result.markdown  # figure asset link
         assert "سلام دنیا" in result.markdown  # OCR'd paragraph text
 
-    async def test_produces_openable_docx_with_real_table_and_omath(self) -> None:
+    async def test_default_mode_produces_semantic_docx_with_real_table_and_omath(
+        self,
+    ) -> None:
+        """
+        Default mode ("semantic") must go through the flow-based
+        renderer (docx.py): the table is a real top-level body table
+        (doc.tables sees it directly), not boxed inside w:txbxContent."""
         result = await self._run()
 
         doc = WordDocument(BytesIO(result.docx_bytes))
-        # The absolute-layout renderer places each element in its own
-        # floating text box, so tables live inside w:txbxContent rather
-        # than as direct document body children — doc.tables (which only
-        # walks top-level body tables) won't see them; check the raw XML.
+        assert "w:txbxContent" not in doc.element.xml
+        assert len(doc.tables) == 1
+        assert "oMath" in doc.element.xml
+
+    async def test_visual_mode_produces_absolute_layout_docx(self) -> None:
+        """
+        mode="visual" is the optional, non-default absolute-layout
+        renderer — tables there are boxed per-element, not top-level."""
+        result = await self._run(mode="visual")
+
+        doc = WordDocument(BytesIO(result.docx_bytes))
+        assert "w:txbxContent" in doc.element.xml
         assert "<w:tbl>" in doc.element.xml
         assert "oMath" in doc.element.xml
 
@@ -141,3 +156,14 @@ class TestDocumentIntelligencePipeline:
         assert (result.output_dir / "document.md").exists()
         assert (result.output_dir / "document.docx").exists()
         assert any((result.output_dir / "assets").iterdir())
+
+    async def test_default_mode_output_passes_the_qa_gate(self) -> None:
+        """
+        CI gate: the default (semantic) pipeline output must clear every
+        QA check — no text boxes, nothing dropped, real tables/OMML,
+        correct RTL, header/footer handled correctly."""
+        result = await self._run()
+
+        report = run_docx_qa(result.document_ast, result.docx_bytes, mode="semantic")
+
+        assert report.passed, report.failures()

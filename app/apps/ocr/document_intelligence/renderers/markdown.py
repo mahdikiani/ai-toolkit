@@ -28,9 +28,7 @@ def render_markdown(ast: DocumentAST) -> str:
 
 
 def _render_figure_or_chart(node: object, assets: dict[str, str]) -> str | None:
-    asset_rel = (
-        assets.get(node.asset_path, node.asset_path) if node.asset_path else ""
-    )
+    asset_rel = assets.get(node.asset_path, node.asset_path) if node.asset_path else ""
     md = ""
     if asset_rel:
         md += f"![{node.caption}]({asset_rel})\n"
@@ -43,9 +41,7 @@ def _render_figure_or_chart(node: object, assets: dict[str, str]) -> str | None:
 
 def _render_list(node: object) -> str:
     parts = (
-        [f"- {c.text}" for c in node.children]
-        if node.children
-        else [f"- {node.text}"]
+        [f"- {c.text}" for c in node.children] if node.children else [f"- {node.text}"]
     )
     return "\n".join(parts)
 

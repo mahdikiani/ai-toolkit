@@ -192,3 +192,38 @@ class TestDetectColumns:
     def test_fewer_than_three_elements_never_splits(self) -> None:
         elements = [_elem("a", 0, 0, 10, 10), _elem("b", 500, 0, 510, 10)]
         assert ReadingOrderResolver._detect_columns(elements) == []
+
+
+@pytest.mark.document_intelligence
+class TestDetectColumnCount:
+    def test_two_well_separated_clusters_report_two_columns(self) -> None:
+        elements = [
+            _elem("a1", 100, 0, 140, 20),
+            _elem("a2", 110, 40, 150, 60),
+            _elem("a3", 120, 80, 160, 100),
+            _elem("b1", 400, 0, 440, 20),
+            _elem("b2", 410, 40, 450, 60),
+            _elem("b3", 420, 80, 460, 100),
+        ]
+
+        count = ReadingOrderResolver().detect_column_count(elements, page_width=500)
+
+        assert count == 2
+
+    def test_single_column_page_reports_one(self) -> None:
+        elements = [
+            _elem("a", 100, 0, 140, 20),
+            _elem("b", 150, 40, 190, 60),
+            _elem("c", 200, 80, 240, 100),
+            _elem("d", 250, 120, 290, 140),
+            _elem("e", 300, 160, 340, 180),
+        ]
+
+        count = ReadingOrderResolver().detect_column_count(elements, page_width=500)
+
+        assert count == 1
+
+    def test_no_elements_reports_one(self) -> None:
+        count = ReadingOrderResolver().detect_column_count([], page_width=500)
+
+        assert count == 1

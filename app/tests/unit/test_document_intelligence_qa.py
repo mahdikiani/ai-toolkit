@@ -100,6 +100,35 @@ class TestAllTextConsumedCheck:
         assert not check.passed
         assert not report.passed
 
+    def test_embedded_line_break_does_not_false_positive(self) -> None:
+        """
+        Regression: a node whose text contains a literal newline becomes
+        a real <w:br/> when rendered (python-docx's run-text setter does
+        this automatically) -- comparing against a naive <w:t>-only text
+        walk that drops the break used to wrongly report the block as
+        missing even though it round-trips correctly."""
+        node = ASTNode(type=LayoutType.paragraph, text="خط اول\nخط دوم")
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        report = run_docx_qa(doc_ast, _render(doc_ast))
+
+        check = next(c for c in report.checks if c.name == "all_ast_text_consumed")
+        assert check.passed, check.detail
+
+    def test_inline_math_span_does_not_false_positive(self) -> None:
+        """
+        Regression: $K$ becomes a real m:oMath object (no <w:t> at all),
+        so the surrounding text collapses tighter than naive substitution
+        assumed (a space where the real render has none) -- must not be
+        reported as a missing/mismatched block."""
+        node = ASTNode(type=LayoutType.paragraph, text="مقدار ($y=1$) درست است")
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        report = run_docx_qa(doc_ast, _render(doc_ast))
+
+        check = next(c for c in report.checks if c.name == "all_ast_text_consumed")
+        assert check.passed, check.detail
+
 
 @pytest.mark.document_intelligence
 class TestReadingOrderCheck:

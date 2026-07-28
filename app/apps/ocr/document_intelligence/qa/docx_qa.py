@@ -4,14 +4,14 @@ Post-generation DOCX QA gate.
 Checks a rendered .docx against the DocumentAST it was built from, per the
 "Quality Assurance" section of the Semantic DOCX redesign plan. This is a
 structural/XML-level check (no LibreOffice/Word needed) meant to run in CI
-as a fail-hard gate on the semantic renderer (docx.py) — the whole point of
-the redesign is that normal text must never end up in a Text Box/Shape or at
-an absolute position, and this is what actually enforces that instead of
-relying on someone noticing in a manual review.
+as a fail-hard gate on the semantic renderer (docx.py) -- the whole point
+of the redesign is that normal text must never end up in a Text Box/Shape
+or at an absolute position, and this is what actually enforces that
+instead of relying on someone noticing in a manual review.
 
-mode="visual" (the absolute-layout renderer, docx_absolute.py) intentionally
-uses text boxes and absolute positioning, so those two checks are reported
-as skipped — not failed — for that mode.
+mode="visual" (the absolute-layout renderer, docx_absolute.py)
+intentionally uses text boxes and absolute positioning, so those two
+checks are reported as skipped -- not failed -- for that mode.
 """
 
 from __future__ import annotations
@@ -35,6 +35,12 @@ _PERSIAN_RE = re.compile(r"[؀-ۿݐ-ݿ]")
 _OMATH_TAG_RE = re.compile(r"<m:oMath[ >]")
 _INSTR_PAGE_RE = re.compile(r"<w:instrText[^>]*>\s*PAGE\s*</w:instrText>")
 _MARKDOWN_CHARS_RE = re.compile(r"[*`]")
+# Inline $latex$/$$latex$$ spans become a real m:oMath object, not
+# literal text -- stripped entirely (not just the $ delimiters) before
+# comparing AST text against rendered body text, since <m:t> math glyphs
+# live outside the <w:t> elements _body_reading_order collects.
+_MATH_SPAN_RE = re.compile(r"\${1,2}[^$\n]+?\${1,2}")
+_WHITESPACE_RE = re.compile(r"\s+")
 
 # Node types whose .text is expected to land somewhere in the document body
 # as ordinary flowing text (as opposed to header/footer/page_number, which
@@ -116,28 +122,56 @@ def run_docx_qa(
 
 
 def _normalize(text: str) -> str:
-    return _MARKDOWN_CHARS_RE.sub("", text or "").strip()
+    # Empty-string, not a space: the real OMML replacement is zero-width in
+    # the <w:t>-based text walk (an inline m:oMath contributes no <w:t> at
+    # all), so "($y_i = 1$)" renders as literal "()" with nothing between
+    # the parens, not "( )" with a space.
+    text = _MATH_SPAN_RE.sub("", text or "")
+    text = _MARKDOWN_CHARS_RE.sub("", text)
+    return _WHITESPACE_RE.sub(" ", text).strip()
 
 
 def _body_reading_order(doc: Document) -> list[dict]:
     """
-    Direct-children walk of doc.element.body, in true document order —.
+    Direct-children walk of doc.element.body, in true document order.
 
-    unlike doc.paragraphs/doc.tables, which each only walk their own kind
+    Unlike doc.paragraphs/doc.tables, which each only walk their own kind
     and lose the interleaved order between them.
     """
     items: list[dict] = []
     for child in doc.element.body:
         if child.tag == qn("w:p"):
-            text = "".join(t.text or "" for t in child.iter(qn("w:t")))
-            items.append({"kind": "paragraph", "text": text, "xml": child})
+            item = {"kind": "paragraph", "text": _element_text(child), "xml": child}
+            items.append(item)
         elif child.tag == qn("w:tbl"):
-            cells = [
-                "".join(t.text or "" for t in tc.iter(qn("w:t")))
-                for tc in child.iter(qn("w:tc"))
-            ]
+            cells = [_element_text(tc) for tc in child.iter(qn("w:tc"))]
             items.append({"kind": "table", "text": " | ".join(cells), "xml": child})
     return items
+
+
+def _element_text(el: object) -> str:
+    r"""
+    Reconstruct visible text the way python-docx's Paragraph.text property does.
+
+    <w:t> contributes its text, <w:tab/> a tab, and <w:br/>/<w:cr/> a
+    newline. A raw <w:t>-only walk (the previous version of this
+    function) silently drops line breaks -- e.g. one AST node's text
+    containing an embedded "\\n" becomes a real <w:br/> when rendered
+    (python-docx's run-text setter does this automatically), and
+    comparing that against the un-reconstructed rendered text would
+    wrongly report the block as missing even though it round-trips
+    correctly.
+    """
+    parts = []
+    for node in el.iter():
+        tag = node.tag
+        if tag == qn("w:t"):
+            parts.append(node.text or "")
+        elif tag in (qn("w:br"), qn("w:cr")):
+            parts.append("\n")
+        elif tag == qn("w:tab"):
+            parts.append("\t")
+    return "".join(parts)
 
 
 def _expected_text_nodes(ast: DocumentAST) -> list[str]:
@@ -257,12 +291,13 @@ def _check_formulas_are_real_omml(ast: DocumentAST, xml: str) -> QACheck:
 
 def _paragraph_own_text(p: object) -> str:
     """
-    Text from this <w:p>'s own direct <w:r> runs only — not text belonging.
+    Text from this <w:p>'s own direct <w:r> runs only.
 
-    to a further-nested <w:p> hosted inside one of its runs' <w:pict>
-    (relevant only for the visual/absolute-layout renderer, where the outer
-    wrapper paragraph has no text of its own — only the nested txbxContent
-    paragraph does, with its own independent pPr).
+    Not text belonging to a further-nested <w:p> hosted inside one of its
+    runs' <w:pict> (relevant only for the visual/absolute-layout
+    renderer, where the outer wrapper paragraph has no text of its own --
+    only the nested txbxContent paragraph does, with its own independent
+    pPr).
     """
     return "".join(
         t.text or "" for r in p.findall(qn("w:r")) for t in r.findall(qn("w:t"))
@@ -271,11 +306,11 @@ def _paragraph_own_text(p: object) -> str:
 
 def _check_rtl_bidi(doc: Document) -> QACheck:
     """
-    Every real <w:p> containing Persian text must carry <w:bidi/> on its.
+    Every real <w:p> containing Persian text must carry <w:bidi/> on its own pPr.
 
-    own pPr — checked over all <w:p> elements in the body, recursively, so
-    both the flat semantic renderer and the nested-textbox visual renderer
-    are covered by the same check.
+    Checked over all <w:p> elements in the body, recursively, so both the
+    flat semantic renderer and the nested-textbox visual renderer are
+    covered by the same check.
     """
     offenders = []
     for p in doc.element.body.iter(qn("w:p")):
@@ -321,18 +356,21 @@ def _check_page_number_is_real_field(
     ast: DocumentAST, doc: Document, xml: str, mode: str
 ) -> QACheck:
     """
-    Describe verified page-number sequence must become a real PAGE field, never.
+    Check that a verified page-number sequence becomes a real PAGE field.
 
-    raw OCR'd digits standing in for one (acceptance criterion #6). Only
-    enforced for mode="semantic" -- the visual renderer has no field-code
-    support inside VML text boxes and is skipped, not failed.
+    Never raw OCR'd digits standing in for one (acceptance criterion #6).
+    Only enforced for mode="semantic" -- the visual renderer has no
+    field-code support inside VML text boxes and is skipped, not failed.
     """
     if mode != "semantic":
         return QACheck(
             "page_number_uses_real_field", True, "skipped (visual mode has no fields)"
         )
-    _headers, footers = detect_header_footer_regions(ast)
-    expects_page_field = any(r.has_page_field for r in footers)
+    _header_plan, footer_plan = detect_header_footer_regions(ast)
+    expects_page_field = any(r.has_page_field for r in footer_plan.regions) or (
+        footer_plan.different_first_page
+        and any(r.has_page_field for r in footer_plan.first_page_regions)
+    )
     if not expects_page_field:
         return QACheck(
             "page_number_uses_real_field", True, "skipped (no page-number sequence)"

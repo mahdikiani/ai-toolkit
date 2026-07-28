@@ -236,7 +236,7 @@ class PromptEngine:
 
     def load_model_config(self, prompt_path: Path | str) -> dict:
         """
-        Return the model/temperature/max_tokens declared in a prompt's YAML.
+        Return the model/temperature/max_tokens/chunking config from a prompt's YAML.
 
         A prompt file's own ``model:``/``temperature:``/``max_tokens:``
         top-level keys are per-task tuning (e.g. a long-form task needs a
@@ -244,6 +244,13 @@ class PromptEngine:
         cleanup task) -- callers must forward these into the actual
         completion request rather than falling back to a single global
         default for every prompt.
+
+        ``chunk_max_chars:``/``use_glossary:`` opt a prompt into
+        multi-part processing for inputs whose required output is
+        proportional to input length (translate, notes, ...) -- a
+        single completion call has an output-token ceiling far below
+        what a whole long document needs, no matter how high
+        max_tokens is set.
         """
         prompt_path = Path(prompt_path)
         main_config = load_data(prompt_path)
@@ -251,7 +258,13 @@ class PromptEngine:
             return {}
         return {
             key: main_config[key]
-            for key in ("model", "temperature", "max_tokens")
+            for key in (
+                "model",
+                "temperature",
+                "max_tokens",
+                "chunk_max_chars",
+                "use_glossary",
+            )
             if key in main_config
         }
 

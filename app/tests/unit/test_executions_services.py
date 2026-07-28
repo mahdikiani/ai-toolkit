@@ -247,6 +247,178 @@ class TestInvokeStream:
 
 
 @pytest.mark.unit
+class TestChunkedProcessing:
+    """
+    Tests for process_execution_task's long-document chunking path.
+
+    Regression: translating (or turning into study notes) a whole book
+    used to always run as a single completion call -- no matter how
+    high max_tokens was set, a single call's output ceiling is far
+    below what a whole book needs, so output silently cut off partway
+    through. Content longer than chunk_max_chars must be split, each
+    part processed separately, and the parts stitched back together.
+    """
+
+    @staticmethod
+    def _write_prompt(tmp_path: Path, **extra_yaml: str) -> None:
+        extra = "".join(f"{k}: {v}\n" for k, v in extra_yaml.items())
+        (tmp_path / "translate.yaml").write_text(
+            "model: openai/gpt-5.6-terra\n"
+            f"{extra}"
+            "task:\n  system:\n    persona: translate\n  user: '{{ content }}'\n"
+        )
+
+    async def test_short_content_skips_chunking(self, tmp_path: Path) -> None:
+        self._write_prompt(tmp_path, chunk_max_chars="1000", use_glossary="true")
+        task = _task_mock(
+            prompt_name="translate",
+            input_variables={"content": "short text"},
+            user_id="user_123",
+        )
+
+        with (
+            patch("apps.language.promptic.services.Settings") as mock_settings,
+            patch(
+                "apps.language.promptic.services.call_openrouter",
+                new_callable=AsyncMock,
+                return_value=("translated", {"model": "x", "usage": {}}),
+            ) as mock_call,
+            patch(
+                "apps.language.promptic.services.finance.meter_cost",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "apps.language.promptic.services.finance.estimate_text_cost",
+                return_value=1.0,
+            ),
+        ):
+            mock_settings.prompts_dir = tmp_path
+            mock_settings.default_model = "openai/gpt-4o-mini"
+            result = await process_execution_task(task)
+
+        # a single call: no glossary pass, no chunk splitting
+        assert mock_call.await_count == 1
+        assert result.result == "translated"
+        assert result.provider_meta == {"model": "x", "usage": {}}
+
+    async def test_long_content_splits_into_chunks_and_stitches_result(
+        self, tmp_path: Path
+    ) -> None:
+        self._write_prompt(tmp_path, chunk_max_chars="20", use_glossary="false")
+        long_content = "\n\n".join(f"paragraph {i} text here" for i in range(6))
+        task = _task_mock(
+            prompt_name="translate",
+            input_variables={"content": long_content},
+            user_id="user_123",
+        )
+
+        call_count = 0
+
+        async def fake_call(
+            *args: object, **kwargs: object
+        ) -> tuple[str, dict[str, object]]:
+            nonlocal call_count
+            call_count += 1
+            return f"chunk-{call_count}", {
+                "model": "x",
+                "usage": {"total_tokens": 10},
+            }
+
+        with (
+            patch("apps.language.promptic.services.Settings") as mock_settings,
+            patch(
+                "apps.language.promptic.services.call_openrouter",
+                side_effect=fake_call,
+            ),
+            patch(
+                "apps.language.promptic.services.finance.meter_cost",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "apps.language.promptic.services.finance.estimate_text_cost",
+                return_value=1.0,
+            ),
+        ):
+            mock_settings.prompts_dir = tmp_path
+            mock_settings.default_model = "openai/gpt-4o-mini"
+            result = await process_execution_task(task)
+
+        assert result.task_status == TaskStatusEnum.completed
+        assert call_count > 1
+        assert result.result.count("chunk-") == call_count
+        assert result.provider_meta["chunked"] is True
+        assert result.provider_meta["chunk_count"] == call_count
+
+    async def test_glossary_is_built_once_from_full_content_before_chunking(
+        self, tmp_path: Path
+    ) -> None:
+        self._write_prompt(tmp_path, chunk_max_chars="20", use_glossary="true")
+        long_content = "\n\n".join(f"paragraph {i} text here" for i in range(4))
+        task = _task_mock(
+            prompt_name="translate",
+            input_variables={"content": long_content, "language": "Persian"},
+            user_id="user_123",
+        )
+
+        seen_users: list[str] = []
+
+        async def fake_call(
+            system: str, user: str, **kwargs: object
+        ) -> tuple[str, dict[str, object]]:
+            seen_users.append(user)
+            return "ok", {"model": "x", "usage": {}}
+
+        with (
+            patch("apps.language.promptic.services.Settings") as mock_settings,
+            patch(
+                "apps.language.promptic.services.call_openrouter",
+                side_effect=fake_call,
+            ),
+            patch(
+                "apps.language.promptic.services.finance.meter_cost",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "apps.language.promptic.services.finance.estimate_text_cost",
+                return_value=1.0,
+            ),
+        ):
+            mock_settings.prompts_dir = tmp_path
+            mock_settings.default_model = "openai/gpt-4o-mini"
+            result = await process_execution_task(task)
+
+        # the first call awaited is the glossary pass over the FULL content
+        assert long_content in seen_users[0]
+        assert result.provider_meta["chunk_count"] == len(seen_users) - 1
+
+    async def test_chunk_failure_fails_the_whole_task(self, tmp_path: Path) -> None:
+        self._write_prompt(tmp_path, chunk_max_chars="20", use_glossary="false")
+        long_content = "\n\n".join(f"paragraph {i} text here" for i in range(6))
+        task = _task_mock(
+            prompt_name="translate",
+            input_variables={"content": long_content},
+            user_id="user_123",
+        )
+
+        with (
+            patch("apps.language.promptic.services.Settings") as mock_settings,
+            patch(
+                "apps.language.promptic.services.call_openrouter",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("chunk failed"),
+            ),
+        ):
+            mock_settings.prompts_dir = tmp_path
+            result = await process_execution_task(task)
+
+        assert result.task_status == TaskStatusEnum.error
+        assert "chunk failed" in result.error
+
+
+@pytest.mark.unit
 class TestProcessExecutionTask:
     """Tests for process_execution_task function."""
 

@@ -336,6 +336,20 @@ class TestLoadModelConfig:
         engine = PromptEngine(base_dir=tmp_path)
         assert engine.load_model_config(prompt_file) == {}
 
+    def test_returns_declared_chunking_config(self, tmp_path: Path) -> None:
+        prompt_file = tmp_path / "test_prompt.yaml"
+        prompt_file.write_text(
+            "name: test_prompt\n"
+            "chunk_max_chars: 6000\n"
+            "use_glossary: true\n"
+            "task:\n  system:\n    persona: helpful\n  user: hi\n"
+        )
+
+        engine = PromptEngine(base_dir=tmp_path)
+        config = engine.load_model_config(prompt_file)
+
+        assert config == {"chunk_max_chars": 6000, "use_glossary": True}
+
     def test_returns_empty_dict_for_non_dict_prompt(self, tmp_path: Path) -> None:
         prompt_file = tmp_path / "test_prompt.txt"
         prompt_file.write_text("just a plain string prompt")

@@ -2,6 +2,14 @@ name: structure
 model: openai/gpt-5.6-terra
 temperature: 0.3
 max_tokens: 8000
+# Preserving "all original information" means output length tracks
+# input length -- content longer than chunk_max_chars is split into
+# ordered parts and processed part by part (see
+# services._process_chunked). use_glossary runs one pass over the full
+# document first so recurring terms/names get the same rendering in
+# every part, not just parts next to each other.
+chunk_max_chars: 6000
+use_glossary: true
 system: |
   You are a document editor specializing in Markdown formatting.
   Your job is to take raw or poorly-formatted text and turn it into

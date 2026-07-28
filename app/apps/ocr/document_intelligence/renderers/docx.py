@@ -824,6 +824,8 @@ def _add_image(
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = p.add_run()
         run.add_picture(BytesIO(img_bytes), width=Inches(width_in))
+        if node.description:
+            _set_image_alt_text(run, node.description)
         if node.caption:
             cap = doc.add_paragraph()
             cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -833,18 +835,29 @@ def _add_image(
         _add_paragraph(doc, f"[تصویر: {node.caption}]", italic=True)
 
 
+def _set_image_alt_text(run: object, description: str) -> None:
+    """
+    Set an inline picture's real Word "Alt Text" (accessibility description).
+
+    The VLM-generated description of a figure/chart is written into
+    <wp:docPr descr="..."/> -- the same field Word's own "Edit Alt Text"
+    panel reads/writes -- rather than as a visible paragraph. It's
+    accessibility metadata, not body text a sighted reader should see
+    twice (once as the image, once as a redundant paragraph beneath it).
+    """
+    doc_pr = run._element.find(f".//{qn('wp:docPr')}")
+    if doc_pr is not None:
+        doc_pr.set("descr", description)
+
+
 def _add_chart(
     doc: Document,
     node: object,
     page_width_px: float = 0.0,
     content_width_in: float = 6.0,
 ) -> None:
-    """Render chart — image + caption + optional data table."""
+    """Render chart — image (with caption and alt text) plus optional data table."""
     _add_image(doc, node, page_width_px, content_width_in)
-    if node.caption:
-        _add_paragraph(doc, node.caption, italic=True)
-    if node.description:
-        _add_paragraph(doc, node.description)
     if node.chart_data and node.chart_data.get("data"):
         rows = [["Label", "Value"]]
         rows.extend(

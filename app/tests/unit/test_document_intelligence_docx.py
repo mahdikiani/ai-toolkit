@@ -628,6 +628,61 @@ class TestImageSizing:
 
 
 @pytest.mark.document_intelligence
+class TestImageDescriptionBecomesAltText:
+    """
+    A VLM-generated image/chart description is accessibility metadata.
+
+    It must land in the image's real Word "Alt Text" field
+    (<wp:docPr descr="..."/>), not as a second, visible body paragraph
+    duplicating what a sighted reader already sees in the picture.
+    """
+
+    def test_figure_description_sets_alt_text_not_visible_paragraph(
+        self, tmp_path
+    ) -> None:
+        img_path = tmp_path / "fig.png"
+        Image.new("RGB", (50, 50), "white").save(img_path)
+        node = ASTNode(
+            type=LayoutType.figure,
+            asset_path=str(img_path),
+            description="A scatter plot showing two distinct groups of data.",
+        )
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        doc = _open(render_docx(doc_ast))
+
+        from docx.oxml.ns import qn
+
+        doc_pr = doc.element.body.find(f".//{qn('wp:docPr')}")
+        assert doc_pr is not None
+        assert doc_pr.get("descr") == (
+            "A scatter plot showing two distinct groups of data."
+        )
+        body_text = "\n".join(p.text for p in doc.paragraphs)
+        assert "scatter plot" not in body_text
+
+    def test_chart_description_sets_alt_text_not_visible_paragraph(
+        self, tmp_path
+    ) -> None:
+        img_path = tmp_path / "chart.png"
+        Image.new("RGB", (50, 50), "white").save(img_path)
+        node = ASTNode(
+            type=LayoutType.chart,
+            asset_path=str(img_path),
+            caption="Figure 1",
+            description="Bar chart comparing quarterly revenue.",
+        )
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        doc = _open(render_docx(doc_ast))
+
+        body_text = "\n".join(p.text for p in doc.paragraphs)
+        assert "Bar chart comparing" not in body_text
+        # Caption must still render exactly once, not duplicated.
+        assert body_text.count("Figure 1") == 1
+
+
+@pytest.mark.document_intelligence
 class TestInlineMarkdownRendering:
     """
     Bold/italic/code spans and links inside paragraph/list/table text

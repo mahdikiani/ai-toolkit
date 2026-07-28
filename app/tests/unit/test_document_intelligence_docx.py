@@ -678,8 +678,34 @@ class TestImageDescriptionBecomesAltText:
 
         body_text = "\n".join(p.text for p in doc.paragraphs)
         assert "Bar chart comparing" not in body_text
-        # Caption must still render exactly once, not duplicated.
-        assert body_text.count("Figure 1") == 1
+        assert "Figure 1" not in body_text
+
+    def test_caption_is_never_shown_visibly_even_when_short(self, tmp_path) -> None:
+        """
+        Regression: a short VLM caption ("Young Scholars Club logo") is
+        just as much an invented label as a long description -- there's
+        no reliable way to tell it apart from a real printed caption
+        (those are captured as their own separate text element by the
+        layout detector, not through this VLM call at all), so it must
+        never render as visible text regardless of length."""
+        img_path = tmp_path / "logo.png"
+        Image.new("RGB", (50, 50), "white").save(img_path)
+        node = ASTNode(
+            type=LayoutType.figure,
+            asset_path=str(img_path),
+            caption="Young Scholars Club logo",
+        )
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        doc = _open(render_docx(doc_ast))
+
+        body_text = "\n".join(p.text for p in doc.paragraphs)
+        assert "Young Scholars Club logo" not in body_text
+        from docx.oxml.ns import qn
+
+        doc_pr = doc.element.body.find(f".//{qn('wp:docPr')}")
+        assert doc_pr is not None
+        assert doc_pr.get("descr") == "Young Scholars Club logo"
 
 
 @pytest.mark.document_intelligence

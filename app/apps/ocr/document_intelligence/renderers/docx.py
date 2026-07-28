@@ -824,30 +824,33 @@ def _add_image(
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = p.add_run()
         run.add_picture(BytesIO(img_bytes), width=Inches(width_in))
-        if node.description:
-            _set_image_alt_text(run, node.description)
-        if node.caption:
-            cap = doc.add_paragraph()
-            cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            cap_run = cap.add_run(node.caption)
-            cap_run.italic = True
+        alt_text = " ".join(t for t in (node.caption, node.description) if t).strip()
+        if alt_text:
+            _set_image_alt_text(run, alt_text)
     except Exception:
         _add_paragraph(doc, f"[تصویر: {node.caption}]", italic=True)
 
 
-def _set_image_alt_text(run: object, description: str) -> None:
+def _set_image_alt_text(run: object, alt_text: str) -> None:
     """
     Set an inline picture's real Word "Alt Text" (accessibility description).
 
-    The VLM-generated description of a figure/chart is written into
-    <wp:docPr descr="..."/> -- the same field Word's own "Edit Alt Text"
-    panel reads/writes -- rather than as a visible paragraph. It's
-    accessibility metadata, not body text a sighted reader should see
-    twice (once as the image, once as a redundant paragraph beneath it).
+    ``node.caption``/``node.description`` are both VLM-generated -- the
+    VLM is asked for a short caption vs. a longer description, but there
+    is no reliable way to tell its "short caption" apart from just a
+    terser description (e.g. "Young Scholars Club logo" *is* a caption
+    by that prompt's own definition, yet is exactly the same kind of
+    content a sighted reader doesn't need duplicated as a paragraph
+    under the image). Any real caption actually printed in the source
+    document is captured independently by the layout detector as its
+    own text element (rendered normally, like any other paragraph) --
+    so neither VLM field is ever shown as visible body text here, both
+    go into <wp:docPr descr="..."/>, the same field Word's own "Edit Alt
+    Text" panel reads/writes.
     """
     doc_pr = run._element.find(f".//{qn('wp:docPr')}")
     if doc_pr is not None:
-        doc_pr.set("descr", description)
+        doc_pr.set("descr", alt_text)
 
 
 def _add_chart(
@@ -856,7 +859,7 @@ def _add_chart(
     page_width_px: float = 0.0,
     content_width_in: float = 6.0,
 ) -> None:
-    """Render chart — image (with caption and alt text) plus optional data table."""
+    """Render chart — image (with alt text) plus optional data table."""
     _add_image(doc, node, page_width_px, content_width_in)
     if node.chart_data and node.chart_data.get("data"):
         rows = [["Label", "Value"]]

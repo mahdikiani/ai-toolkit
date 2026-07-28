@@ -1,8 +1,15 @@
 """Unit tests for apps.ocr.document_intelligence.elements."""
 
-import pytest
+from unittest.mock import AsyncMock
 
-from apps.ocr.document_intelligence.elements import _split_caption_description
+import pytest
+from PIL import Image
+
+from apps.ocr.document_intelligence.elements import (
+    ElementProcessor,
+    _split_caption_description,
+)
+from apps.ocr.document_intelligence.layout import LayoutElement, LayoutType
 
 
 @pytest.mark.document_intelligence
@@ -77,3 +84,84 @@ class TestSplitCaptionDescription:
         caption, description = _split_caption_description(text)
         assert caption == "شکل ۱: داده‌های سوال"
         assert description == "a chart."
+
+
+def _elem(elem_type: LayoutType) -> LayoutElement:
+    return LayoutElement(
+        id="p0001_e0001",
+        page_id="p0001",
+        page_number=1,
+        type=elem_type,
+        bbox=(0, 0, 100, 100),
+        padded_bbox=(0, 0, 100, 100),
+        confidence=0.9,
+    )
+
+
+@pytest.mark.document_intelligence
+class TestDigitNormalization:
+    """
+    Regression: the VLM inconsistently emits Arabic-Indic digits
+    instead of Persian ones, most often for 4/5/6 whose glyphs
+    genuinely differ between the two scripts -- every handler that
+    produces reader-visible text must normalize digits before they
+    reach the rendered document.
+    """
+
+    @pytest.fixture
+    def crop(self) -> Image.Image:
+        return Image.new("RGB", (10, 10))
+
+    async def test_process_text_normalizes_digits(self, crop: Image.Image) -> None:
+        processor = ElementProcessor(vlm_model="test-model")
+        processor._vlm_call = AsyncMock(return_value="سال ٤٥٦")
+
+        result = await processor._process_text(crop, _elem(LayoutType.paragraph))
+
+        assert result.text == "سال ۴۵۶"
+
+    async def test_process_table_normalizes_digits_without_touching_markup(
+        self, crop: Image.Image
+    ) -> None:
+        processor = ElementProcessor(vlm_model="test-model")
+        processor._vlm_call = AsyncMock(
+            return_value="<table><tr><td>٤</td><td>٦</td></tr></table>"
+        )
+
+        result = await processor._process_table(crop, _elem(LayoutType.table))
+
+        assert result.html == "<table><tr><td>۴</td><td>۶</td></tr></table>"
+        assert result.text == result.html
+
+    async def test_process_figure_normalizes_digits_in_caption_and_description(
+        self, crop: Image.Image
+    ) -> None:
+        processor = ElementProcessor(vlm_model="test-model")
+        processor._vlm_call = AsyncMock(
+            return_value="caption: شکل ٤\ndescription: نمودار سال ٥٦."
+        )
+
+        result = await processor._process_figure(crop, _elem(LayoutType.figure))
+
+        assert result.caption == "شکل ۴"
+        assert result.description == "نمودار سال ۵۶."
+
+    async def test_process_chart_normalizes_title_and_description_only(
+        self, crop: Image.Image
+    ) -> None:
+        processor = ElementProcessor(vlm_model="test-model")
+        processor._vlm_call = AsyncMock(
+            return_value=(
+                '{"chart_type": "bar", "title": "نمودار ٤",'
+                ' "description": "داده سال ٥٦.",'
+                ' "data": [{"label": "٤", "value": 4}]}'
+            )
+        )
+
+        result = await processor._process_chart(crop, _elem(LayoutType.chart))
+
+        assert result.caption == "نمودار ۴"
+        assert result.description == "داده سال ۵۶."
+        # chart_data's own numeric payload is left untouched so exact
+        # values (used for e.g. plotting) aren't altered.
+        assert result.chart_data["data"][0]["label"] == "٤"

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from ..pipeline.normalization import normalize_persian, normalize_persian_digits
 from .layout import LayoutElement, LayoutType
 
 logger = logging.getLogger(__name__)
@@ -242,7 +243,7 @@ class ElementProcessor:
         sp = _read_prompt("text")
         up = f"Extract the {elem.type.value} text from this crop."
         text = await self._vlm_call(crop, sp, up, max_tokens=2048)
-        return ProcessedElement(text=text)
+        return ProcessedElement(text=normalize_persian(text))
 
     async def _process_table(
         self, crop: Image.Image, elem: LayoutElement
@@ -250,6 +251,10 @@ class ElementProcessor:
         sp = _read_prompt("table")
         up = "Extract this table. Return as HTML <table> with <tr> and <td> tags."
         html = await self._vlm_call(crop, sp, up, max_tokens=4096)
+        # Digits only here, not the full normalize_persian() -- its
+        # spacing/punctuation passes aren't safe to run over raw HTML tag
+        # syntax.
+        html = normalize_persian_digits(html)
         return ProcessedElement(text=html, html=html)
 
     async def _process_formula(
@@ -267,7 +272,7 @@ class ElementProcessor:
         sp = _read_prompt("figure")
         up = "Describe this image. Format: caption: ...\\ndescription: ..."
         desc = await self._vlm_call(crop, sp, up, max_tokens=512)
-        caption, description = _split_caption_description(desc)
+        caption, description = _split_caption_description(normalize_persian(desc))
         return ProcessedElement(caption=caption, description=description)
 
     async def _process_chart(
@@ -294,10 +299,15 @@ class ElementProcessor:
                 "description": text,
                 "data": [],
             }
+        # Only title/description are shown as text -- chart_data's own
+        # numeric "data" array is left untouched so chart values stay
+        # exact.
+        title = normalize_persian(data.get("title", ""))
+        description = normalize_persian(data.get("description", ""))
         return ProcessedElement(
-            text=data.get("description", ""),
-            caption=data.get("title", ""),
-            description=data.get("description", ""),
+            text=description,
+            caption=title,
+            description=description,
             chart_data=data,
         )
 

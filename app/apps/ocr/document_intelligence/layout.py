@@ -374,7 +374,16 @@ class LayoutDetector:
                 continue
             bbox = (float(x1), float(y1), float(x2), float(y2))
             padded = _pad_bbox(bbox, page.width, page.height, self.padding_ratio)
-            elem_id = f"{page.id}_e{i + 1:04d}"
+            # Must be unique across *both* models, not just within this call:
+            # detect_page() runs _parse_output once per model and concatenates
+            # the results before deduplication, so two elements uniquely
+            # detected by different models (i.e. surviving dedup as distinct)
+            # previously collided on the same "e0001", "e0002", ... sequence
+            # -- silently corrupting reading order (build_ast's order_map is
+            # keyed by id, so one element's sort position overwrote the
+            # other's) and crop files (also named by id) for any page where
+            # both models detected a different number of elements.
+            elem_id = f"{page.id}_{source}_e{i + 1:04d}"
 
             elements.append(
                 LayoutElement(

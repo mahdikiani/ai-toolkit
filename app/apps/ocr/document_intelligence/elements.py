@@ -35,6 +35,42 @@ def _read_prompt(name: str) -> str:
     return (_PROMPTS_DIR / f"{name}.prompt").read_text().strip()
 
 
+# A real caption ("Figure 1", a short Persian label) is a short label,
+# not a sentence -- the VLM is asked for "a short one-line caption" but
+# doesn't always comply, sometimes labeling a full descriptive sentence
+# as the caption. Past this length it's treated as unreliable and folded
+# into the description instead, rather than trusted to render visibly.
+_MAX_CAPTION_CHARS = 80
+
+
+def _split_caption_description(text: str) -> tuple[str, str]:
+    r"""
+    Split a VLM "caption: ...\ndescription: ..." response into its parts.
+
+    Falls back to an *empty* caption with the whole response as the
+    description when the VLM doesn't follow the requested format, or
+    when it does but "caption" came back too long to plausibly be one
+    (see _MAX_CAPTION_CHARS) -- caption is rendered as real visible text
+    in the output document (unlike description, which becomes image alt
+    text/accessibility metadata), so a caption that's really a
+    description in disguise must never leak into it. Matched
+    case-insensitively (a previous version matched "description:"
+    case-insensitively but then sliced the original-cased text with it,
+    so an actual "Description:" response silently failed to split and
+    hit this same leak).
+    """
+    lower = text.lower()
+    caption_idx = lower.find("caption:")
+    description_idx = lower.find("description:")
+    if 0 <= caption_idx < description_idx:
+        caption = text[caption_idx + len("caption:") : description_idx].strip()
+        description = text[description_idx + len("description:") :].strip()
+        if len(caption) <= _MAX_CAPTION_CHARS:
+            return caption, description
+        return "", f"{caption} {description}".strip()
+    return "", text.strip()
+
+
 @dataclass
 class ProcessedElement:
     """
@@ -231,16 +267,7 @@ class ElementProcessor:
         sp = _read_prompt("figure")
         up = "Describe this image. Format: caption: ...\\ndescription: ..."
         desc = await self._vlm_call(crop, sp, up, max_tokens=512)
-        caption, description = desc, desc
-        if "caption:" in desc.lower():
-            parts = (
-                desc.split("description:", 1)
-                if "description:" in desc.lower()
-                else [desc]
-            )
-            if len(parts) > 1:
-                caption = parts[0].replace("caption:", "").strip()
-                description = parts[1].strip()
+        caption, description = _split_caption_description(desc)
         return ProcessedElement(caption=caption, description=description)
 
     async def _process_chart(

@@ -1,17 +1,26 @@
 name: summarize
-model: openai/gpt-4o-mini
+model: openai/gpt-5.6-terra
 temperature: 0.4
+max_tokens: 8000
 system: |
   You are an expert summarizer. Your summaries are:
-  - Concise yet complete — no important point is lost
+  - Proportional to the source — a long, multi-section document gets a
+    multi-section summary, not a single short paragraph. Never compress
+    a long document down to a token few sentences just to sound "concise";
+    length should scale with how much distinct material the source covers.
+  - Complete — every distinct topic, decision, and conclusion in the
+    source is represented, not just the first section or two
   - Written in the same language as the source content
-  - Structured with bullet points for multi-topic content
+  - Structured with headings/bullet points, one section per distinct topic
   - Free of filler phrases like "this document discusses..."
 prompt: |
   Summarize the following content.
   Write the summary in the same language as the source.
-  Focus on key points, decisions, and conclusions.
-  Use bullet points if there are multiple distinct topics.
+  Go through the ENTIRE content from start to end — do not stop after the
+  first few topics. For each distinct section or topic in the source,
+  include its key points, decisions, and conclusions as its own part of
+  the summary. A long document should produce a correspondingly long,
+  multi-part summary, not a single short paragraph.
 
   ---
   {{ content }}

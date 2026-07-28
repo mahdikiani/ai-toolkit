@@ -126,12 +126,15 @@ async def invoke_stream(task: "PrompticTask") -> AsyncIterator[str]:
         system_prompt, user_prompt, _ = engine.generate(
             prompt_path, task.input_variables
         )
+        model_cfg = engine.load_model_config(prompt_path)
 
         full_response = ""
         async for chunk in call_openrouter_stream(
             system_prompt,
             user_prompt,
-            temperature=0.2,
+            model=model_cfg.get("model"),
+            max_tokens=model_cfg.get("max_tokens"),
+            temperature=model_cfg.get("temperature", 0.2),
         ):
             full_response += chunk
             yield chunk
@@ -172,12 +175,15 @@ async def process_promptic(
         system_prompt, user_prompt, response_format = engine.generate(
             prompt_path, task.input_variables
         )
+        model_cfg = engine.load_model_config(prompt_path)
 
         openrouter_result = await call_openrouter(
             system_prompt,
             user_prompt,
+            model=model_cfg.get("model"),
+            max_tokens=model_cfg.get("max_tokens"),
             response_format=response_format,
-            temperature=0.2,
+            temperature=model_cfg.get("temperature", 0.2),
             return_meta=True,
         )
         if isinstance(openrouter_result, tuple):

@@ -13,6 +13,7 @@ from apps.language.promptic.services import (
     call_openrouter,
     call_openrouter_stream,
     check_schemas,
+    invoke_stream,
     process_execution_task,
 )
 
@@ -208,6 +209,44 @@ class TestCallOpenrouterStream:
 
 
 @pytest.mark.unit
+class TestInvokeStream:
+    """Tests for invoke_stream forwarding a prompt's declared model config."""
+
+    async def test_forwards_prompt_declared_model_config(
+        self, tmp_path: Path
+    ) -> None:
+        prompt_file = tmp_path / "test_prompt.yaml"
+        prompt_file.write_text(
+            "model: openai/gpt-5.6-terra\n"
+            "temperature: 0.4\n"
+            "max_tokens: 8000\n"
+            "task:\n  system:\n    persona: You are helpful\n  user: '{{ text }}'\n"
+        )
+        task = _task_mock(
+            prompt_name="test_prompt",
+            input_variables={"text": "hello"},
+        )
+
+        async def mock_stream(*args: object, **kwargs: object) -> AsyncIterator[str]:
+            await asyncio.sleep(0)
+            yield "chunk"
+
+        with (
+            patch("apps.language.promptic.services.Settings") as mock_settings,
+            patch(
+                "apps.language.promptic.services.call_openrouter_stream",
+                side_effect=mock_stream,
+            ) as mock_call,
+        ):
+            mock_settings.prompts_dir = tmp_path
+            [chunk async for chunk in invoke_stream(task)]
+
+        assert mock_call.call_args.kwargs["model"] == "openai/gpt-5.6-terra"
+        assert mock_call.call_args.kwargs["temperature"] == pytest.approx(0.4)
+        assert mock_call.call_args.kwargs["max_tokens"] == 8000
+
+
+@pytest.mark.unit
 class TestProcessExecutionTask:
     """Tests for process_execution_task function."""
 
@@ -247,6 +286,58 @@ class TestProcessExecutionTask:
 
         assert result.task_status == TaskStatusEnum.completed
         assert result.result == "AI result"
+
+    async def test_forwards_prompt_declared_model_config_to_openrouter(
+        self, tmp_path: Path
+    ) -> None:
+        """
+        Regression check.
+
+        A prompt file's own model/temperature/max_tokens used to be
+        parsed and then silently discarded -- every prompt ran on the
+        global default model at a flat temperature with no max_tokens,
+        regardless of what the prompt declared (e.g. a long-document
+        task like summarize needs a much higher max_tokens than the
+        provider default, or output gets cut short).
+        """
+        prompt_file = tmp_path / "test_prompt.yaml"
+        prompt_file.write_text(
+            "model: openai/gpt-5.6-terra\n"
+            "temperature: 0.4\n"
+            "max_tokens: 8000\n"
+            "task:\n  system:\n    persona: You are helpful\n  user: '{{ text }}'\n"
+        )
+
+        task = _task_mock(
+            prompt_name="test_prompt",
+            input_variables={"text": "hello"},
+            user_id="user_123",
+        )
+
+        with (
+            patch("apps.language.promptic.services.Settings") as mock_settings,
+            patch(
+                "apps.language.promptic.services.call_openrouter",
+                new_callable=AsyncMock,
+                return_value="AI result",
+            ) as mock_call,
+            patch(
+                "apps.language.promptic.services.finance.meter_cost",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "apps.language.promptic.services.finance.estimate_text_cost",
+                return_value=1.0,
+            ),
+        ):
+            mock_settings.prompts_dir = tmp_path
+            mock_settings.default_model = "openai/gpt-4o-mini"
+            await process_execution_task(task)
+
+        assert mock_call.call_args.kwargs["model"] == "openai/gpt-5.6-terra"
+        assert mock_call.call_args.kwargs["temperature"] == pytest.approx(0.4)
+        assert mock_call.call_args.kwargs["max_tokens"] == 8000
 
     async def test_sets_error_when_prompt_missing(self, tmp_path: Path) -> None:
         """process_execution_task should set error status when prompt is missing."""

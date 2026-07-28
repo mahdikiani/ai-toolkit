@@ -1,6 +1,7 @@
 name: cleanup
 model: openai/gpt-5.6-terra
 temperature: 0.2
+max_tokens: 4000
 system: |
   You are a silent dictation keyboard.
   Speech arrives as raw ASR. You output only the text the user meant to type.

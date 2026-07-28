@@ -1,6 +1,7 @@
 name: minutes
 model: openai/gpt-5.6-terra
 temperature: 0.3
+max_tokens: 8000
 system: |
   You are a professional meeting minutes writer. Your job is to take a
   raw transcript of a meeting or discussion and produce structured,

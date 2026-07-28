@@ -290,6 +290,61 @@ class TestPromptEngine:
 
 
 @pytest.mark.unit
+class TestLoadModelConfig:
+    """
+    Tests for PromptEngine.load_model_config.
+
+    Regression: a prompt's own model/temperature/max_tokens top-level
+    keys used to be parsed by generate() and then silently discarded --
+    every prompt ran on the caller's single global default model and
+    temperature, with no max_tokens at all, regardless of what the
+    prompt file declared.
+    """
+
+    def test_returns_declared_model_temperature_and_max_tokens(
+        self, tmp_path: Path
+    ) -> None:
+        prompt_file = tmp_path / "test_prompt.yaml"
+        prompt_file.write_text(
+            "name: test_prompt\n"
+            "model: openai/gpt-5.6-terra\n"
+            "temperature: 0.4\n"
+            "max_tokens: 8000\n"
+            "task:\n"
+            "  system:\n"
+            "    persona: helpful\n"
+            "  user: hi\n"
+        )
+
+        engine = PromptEngine(base_dir=tmp_path)
+        config = engine.load_model_config(prompt_file)
+
+        assert config == {
+            "model": "openai/gpt-5.6-terra",
+            "temperature": 0.4,
+            "max_tokens": 8000,
+        }
+
+    def test_returns_empty_dict_when_no_model_keys_declared(
+        self, tmp_path: Path
+    ) -> None:
+        prompt_file = tmp_path / "test_prompt.yaml"
+        prompt_file.write_text(
+            "task:\n  system:\n    persona: helpful\n  user: hi\n"
+        )
+
+        engine = PromptEngine(base_dir=tmp_path)
+        assert engine.load_model_config(prompt_file) == {}
+
+    def test_returns_empty_dict_for_non_dict_prompt(self, tmp_path: Path) -> None:
+        prompt_file = tmp_path / "test_prompt.txt"
+        prompt_file.write_text("just a plain string prompt")
+
+        engine = PromptEngine(base_dir=tmp_path)
+        assert engine.load_model_config(prompt_file) == {}
+
+
+@pytest.mark.unit
 class TestPromptEngineErrorHandling:
     """
     Tests for PromptEngine error handling.

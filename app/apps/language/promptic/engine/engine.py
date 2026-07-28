@@ -234,6 +234,27 @@ class PromptEngine:
             return f"<{tag}>\n{rendered.strip()}\n</{tag}>"
         return None
 
+    def load_model_config(self, prompt_path: Path | str) -> dict:
+        """
+        Return the model/temperature/max_tokens declared in a prompt's YAML.
+
+        A prompt file's own ``model:``/``temperature:``/``max_tokens:``
+        top-level keys are per-task tuning (e.g. a long-form task needs a
+        stronger model and a much higher max_tokens than a one-line
+        cleanup task) -- callers must forward these into the actual
+        completion request rather than falling back to a single global
+        default for every prompt.
+        """
+        prompt_path = Path(prompt_path)
+        main_config = load_data(prompt_path)
+        if not isinstance(main_config, dict):
+            return {}
+        return {
+            key: main_config[key]
+            for key in ("model", "temperature", "max_tokens")
+            if key in main_config
+        }
+
     def generate(
         self, prompt_path: Path | str, input_data: dict
     ) -> tuple[str, str, dict | None]:

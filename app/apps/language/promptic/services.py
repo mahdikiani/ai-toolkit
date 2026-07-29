@@ -134,6 +134,27 @@ def _cost_for(provider_meta: dict[str, object]) -> float:
     )
 
 
+def _estimate_preflight_cost(model_cfg: dict, input_variables: dict) -> float:
+    """
+    Conservative pre-flight cost estimate, before any LLM call is made.
+
+    Approximates tokens from character count (~4 chars/token) across all
+    string input variables, assuming output length on the same order as
+    input plus a margin for chunking overhead (glossary pass, per-chunk
+    instructions). This overestimates compressive tasks (summarize,
+    quiz) and is roughly right for content-preserving ones (translate,
+    structure, notes) -- the right direction to err for a gate that
+    runs before any money is spent.
+    """
+    chars = sum(len(v) for v in input_variables.values() if isinstance(v, str))
+    approx_tokens = int(chars / 4) * 2  # input + output, roughly
+    approx_tokens = int(approx_tokens * 1.2)  # chunking overhead margin
+    return finance.estimate_text_cost(
+        model=str(model_cfg.get("model") or ""),
+        usage={"total_tokens": approx_tokens},
+    )
+
+
 async def _build_glossary(
     content: str, *, language: str | None, model: str | None
 ) -> tuple[str, dict[str, object]]:
@@ -329,6 +350,22 @@ async def process_promptic(
     try:
         engine = PromptEngine(base_dir=prompts_dir)
         model_cfg = engine.load_model_config(prompt_path)
+
+        # Gate on quota BEFORE spending anything -- a chunked job can be
+        # dozens of calls (a whole book), so discovering insufficient
+        # funds only after the fact would mean paying for work the user
+        # can't afford and then failing to bill it.
+        estimated = _estimate_preflight_cost(model_cfg, task.input_variables)
+        quota = await finance.check_quota(
+            task.user_id, estimated, raise_exception=False
+        )
+        if quota < estimated:
+            await task.update_and_emit(
+                error="insufficient_quota",
+                task_status=TaskStatusEnum.error,
+            )
+            return task
+
         chunk_max_chars = model_cfg.get("chunk_max_chars")
         content = task.input_variables.get("content")
 
@@ -364,15 +401,25 @@ async def process_promptic(
                 provider_meta = {}
             amount = _cost_for(provider_meta)
 
-        metered = await finance.meter_cost(
-            task.user_id,
-            amount,
-            meta_data={
-                "service": "promptic",
-                "prompt": task.prompt_name,
-                "provider_meta": provider_meta,
-            },
-        )
+        # A billing-recording failure must never discard an already-computed
+        # result -- the LLM cost was already spent, so the task still
+        # completes for the user; the estimated amount is kept on the task
+        # for later reconciliation even though it wasn't actually recorded.
+        try:
+            metered = await finance.meter_cost(
+                task.user_id,
+                amount,
+                meta_data={
+                    "service": "promptic",
+                    "prompt": task.prompt_name,
+                    "provider_meta": provider_meta,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to meter promptic usage for task %s", task.uid
+            )
+            metered = None
 
         await task.update_and_emit(
             result=result,

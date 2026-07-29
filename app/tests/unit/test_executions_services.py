@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -416,6 +417,133 @@ class TestChunkedProcessing:
 
         assert result.task_status == TaskStatusEnum.error
         assert "chunk failed" in result.error
+
+
+@pytest.mark.unit
+class TestPrompticBillingGate:
+    """
+    Tests for the pre-flight quota check and non-destructive metering.
+
+    Regression: process_promptic used to have no pre-flight quota check
+    at all -- a chunked job (a whole book) could run dozens of LLM
+    calls to completion before any billing decision was made. And
+    meter_cost was called unguarded right before delivering the
+    result, so a transient billing-service failure discarded an
+    already-computed, already-paid-for-in-LLM-cost result.
+    """
+
+    async def test_insufficient_quota_stops_before_any_llm_call(
+        self, tmp_path: Path
+    ) -> None:
+        prompt_file = tmp_path / "translate.yaml"
+        prompt_file.write_text(
+            "model: openai/gpt-5.6-terra\n"
+            "task:\n  system:\n    persona: translate\n  user: '{{ content }}'\n"
+        )
+        task = _task_mock(
+            prompt_name="translate",
+            input_variables={"content": "x" * 10_000},
+            user_id="user_123",
+        )
+
+        with (
+            patch("apps.language.promptic.services.Settings") as mock_settings,
+            patch(
+                "apps.language.promptic.services.finance.check_quota",
+                new_callable=AsyncMock,
+                return_value=Decimal("0"),
+            ),
+            patch(
+                "apps.language.promptic.services.call_openrouter",
+                new_callable=AsyncMock,
+            ) as mock_call,
+        ):
+            mock_settings.prompts_dir = tmp_path
+            result = await process_execution_task(task)
+
+        mock_call.assert_not_awaited()
+        assert result.task_status == TaskStatusEnum.error
+        assert result.error == "insufficient_quota"
+
+    async def test_sufficient_quota_proceeds_with_the_call(
+        self, tmp_path: Path
+    ) -> None:
+        prompt_file = tmp_path / "translate.yaml"
+        prompt_file.write_text(
+            "model: openai/gpt-5.6-terra\n"
+            "task:\n  system:\n    persona: translate\n  user: '{{ content }}'\n"
+        )
+        task = _task_mock(
+            prompt_name="translate",
+            input_variables={"content": "hello"},
+            user_id="user_123",
+        )
+
+        with (
+            patch("apps.language.promptic.services.Settings") as mock_settings,
+            patch(
+                "apps.language.promptic.services.finance.check_quota",
+                new_callable=AsyncMock,
+                return_value=Decimal("999999"),
+            ),
+            patch(
+                "apps.language.promptic.services.call_openrouter",
+                new_callable=AsyncMock,
+                return_value=("translated", {"model": "x", "usage": {}}),
+            ) as mock_call,
+            patch(
+                "apps.language.promptic.services.finance.meter_cost",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            mock_settings.prompts_dir = tmp_path
+            result = await process_execution_task(task)
+
+        mock_call.assert_awaited()
+        assert result.task_status == TaskStatusEnum.completed
+        assert result.result == "translated"
+
+    async def test_metering_failure_still_delivers_the_completed_result(
+        self, tmp_path: Path
+    ) -> None:
+        prompt_file = tmp_path / "translate.yaml"
+        prompt_file.write_text(
+            "model: openai/gpt-5.6-terra\n"
+            "task:\n  system:\n    persona: translate\n  user: '{{ content }}'\n"
+        )
+        task = _task_mock(
+            prompt_name="translate",
+            input_variables={"content": "hello"},
+            user_id="user_123",
+        )
+
+        with (
+            patch("apps.language.promptic.services.Settings") as mock_settings,
+            patch(
+                "apps.language.promptic.services.finance.check_quota",
+                new_callable=AsyncMock,
+                return_value=Decimal("999999"),
+            ),
+            patch(
+                "apps.language.promptic.services.call_openrouter",
+                new_callable=AsyncMock,
+                return_value=("translated", {"model": "x", "usage": {}}),
+            ),
+            patch(
+                "apps.language.promptic.services.finance.meter_cost",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("billing service unreachable"),
+            ),
+        ):
+            mock_settings.prompts_dir = tmp_path
+            result = await process_execution_task(task)
+
+        # the translation is real, paid-for LLM output -- a billing outage
+        # must not throw it away
+        assert result.task_status == TaskStatusEnum.completed
+        assert result.result == "translated"
+        assert result.usage_id is None
 
 
 @pytest.mark.unit

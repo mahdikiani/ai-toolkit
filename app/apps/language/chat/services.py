@@ -1,6 +1,7 @@
 """OpenRouter proxy and chat completion helpers."""
 
 import json
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal
@@ -18,6 +19,8 @@ from utils.billing import finance
 from utils.integrations import openrouter as openrouter_client
 
 from .models import ChatMessage, ChatSession, ChatThread
+
+logger = logging.getLogger(__name__)
 
 SESSION_TITLE_PROMPT = "chat_session_title.yaml"
 
@@ -118,16 +121,19 @@ async def evaluate_session_title(
             usage=provider_usage if isinstance(provider_usage, dict) else None,
             raw_cost=_text_cost_value(raw_cost),
         )
-        await finance.meter_cost(
-            user_id,
-            amount,
-            meta_data={
-                "service": "chat",
-                "kind": "session_title",
-                "prompt": SESSION_TITLE_PROMPT,
-                "provider_meta": provider_meta,
-            },
-        )
+        try:
+            await finance.meter_cost(
+                user_id,
+                amount,
+                meta_data={
+                    "service": "chat",
+                    "kind": "session_title",
+                    "prompt": SESSION_TITLE_PROMPT,
+                    "provider_meta": provider_meta,
+                },
+            )
+        except Exception:
+            logger.exception("Failed to meter session-title usage for %s", user_id)
 
         if not has_title or not title:
             return SessionTitleSuggestion(has_title=False)
@@ -208,15 +214,18 @@ async def suggest_title_from_exchange(
         usage=provider_usage if isinstance(provider_usage, dict) else None,
         raw_cost=_text_cost_value(raw_cost),
     )
-    await finance.meter_cost(
-        user_id,
-        amount,
-        meta_data={
-            "service": "chat",
-            "kind": f"{kind}_title",
-            "provider_meta": provider_meta,
-        },
-    )
+    try:
+        await finance.meter_cost(
+            user_id,
+            amount,
+            meta_data={
+                "service": "chat",
+                "kind": f"{kind}_title",
+                "provider_meta": provider_meta,
+            },
+        )
+    except Exception:
+        logger.exception("Failed to meter %s-title usage for %s", kind, user_id)
     return title[:120]
 
 
@@ -320,11 +329,18 @@ async def complete_assistant_message(
     if not msgs:
         raise ThreadHasNoMessagesError()
 
+    model = thread_model(thread)
     payload = {
-        "model": thread_model(thread),
+        "model": model,
         "messages": msgs,
         "temperature": 0.7,
     }
+
+    estimated = finance.estimate_text_cost(
+        model=model,
+        usage={"total_tokens": max(100, sum(len(m["content"]) for m in msgs) // 4)},
+    )
+    await finance.check_quota(user_id, estimated, raise_exception=True)
 
     try:
         raw_json = await openrouter_client.complete_chat_json(payload)
@@ -348,15 +364,19 @@ async def complete_assistant_message(
         usage=provider_usage if isinstance(provider_usage, dict) else None,
         raw_cost=_text_cost_value(raw_cost),
     )
-    usage = await finance.meter_cost(
-        user_id,
-        amount,
-        meta_data={
-            "service": "chat",
-            "thread_uid": thread.uid,
-            "provider_meta": provider_meta,
-        },
-    )
+    try:
+        usage = await finance.meter_cost(
+            user_id,
+            amount,
+            meta_data={
+                "service": "chat",
+                "thread_uid": thread.uid,
+                "provider_meta": provider_meta,
+            },
+        )
+    except Exception:
+        logger.exception("Failed to meter chat usage for thread %s", thread.uid)
+        usage = None
 
     return await ChatMessage.create_item({
         "thread_uid": thread.uid,

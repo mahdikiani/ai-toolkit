@@ -462,7 +462,11 @@ class TestTranscriptionQuotaAndMetering:
             await _process_chunked_transcribe(task, sync=False)
 
         # Verify metering was called with total cost
-        mock_meter.assert_called_once_with(task.user_id, 10.0)
+        mock_meter.assert_called_once_with(
+            task.user_id,
+            10.0,
+            meta_data={"service": "transcribe", "provider": "soniox", "chunks": 2},
+        )
 
     async def test_meters_usage_after_webhook_processing(self) -> None:
         """Webhook processing should meter usage after transcription completion."""
@@ -519,6 +523,70 @@ class TestTranscriptionQuotaAndMetering:
         mock_meter.assert_called_once()
         # Cost should be ceil((60000 / 60 / 1000) * 10) = 10
         assert mock_meter.call_args[0][1] == pytest.approx(1.0)
+
+    async def test_metering_failure_still_delivers_the_transcript(self) -> None:
+        """
+        Regression check.
+
+        meter_cost failing (billing-service outage, or actual usage
+        running over the pre-flight estimate) used to be treated as
+        "payment_required" and threw away the already-produced
+        transcript -- Soniox was already paid for the work by this
+        point, so the result must still be delivered.
+        """
+        from soniox.types import TranscriptionJobStatus
+
+        from apps.transcribe.services import process_transcription_webhook
+
+        task = MagicMock()
+        task.uid = "task_123"
+        task.user_id = "user_123"
+        task.transcription_job_id = "job_123"
+        task.task_status = TaskStatusEnum.processing
+        task.update_and_emit = AsyncMock()
+        task.save = AsyncMock(return_value=task)
+
+        webhook_data = MagicMock()
+        webhook_data.id = "job_123"
+        webhook_data.status = TranscriptionJobStatus.COMPLETED
+
+        mock_job_result = MagicMock()
+        mock_job_result.audio_duration_ms = 60000
+
+        mock_transcript = MagicMock()
+        mock_transcript.text = "Transcribed text"
+
+        with (
+            patch("apps.transcribe.services.Settings") as mock_settings,
+            patch(
+                "apps.transcribe.services.soniox.get_transcription_job_async",
+                new_callable=AsyncMock,
+                return_value=mock_job_result,
+            ),
+            patch(
+                "apps.transcribe.services.soniox.get_transcription_result_async",
+                new_callable=AsyncMock,
+                return_value=mock_transcript,
+            ),
+            patch(
+                "apps.transcribe.services.finance.meter_cost",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("billing service unreachable"),
+            ),
+            patch(
+                "apps.transcribe.services.conditions.Conditions",
+            ) as mock_conditions_cls,
+        ):
+            mock_settings.minutes_price = 10
+            mock_conditions = MagicMock()
+            mock_conditions.release_condition = AsyncMock()
+            mock_conditions_cls.return_value = mock_conditions
+
+            result = await process_transcription_webhook(task, webhook_data)
+
+        assert result.task_status == TaskStatusEnum.completed
+        assert result.result == "Transcribed text"
+        assert result.usage_id is None
 
 
 @pytest.mark.unit

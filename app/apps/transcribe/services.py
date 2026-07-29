@@ -7,7 +7,6 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-import httpx
 from beanie.exceptions import CollectionWasNotInitialized
 from fastapi_mongo_base.tasks import TaskStatusEnum
 from soniox import SonioxClient
@@ -254,9 +253,26 @@ async def _process_chunked_transcribe(
 
     combined_text = _combine_chunk_texts(ordered_results)
     total_cost = sum(result.transcription_cost for result in ordered_results)
-    await finance.meter_cost(task.user_id, total_cost)
+    usage = None
+    try:
+        usage = await finance.meter_cost(
+            task.user_id,
+            total_cost,
+            meta_data={
+                "service": "transcribe",
+                "provider": _task_provider(task),
+                "chunks": len(ordered_results),
+            },
+        )
+    except Exception:
+        logging.exception("Failed to meter chunked transcribe usage for %s", task.uid)
     await conditions.Conditions().release_condition(task.uid)
-    return await save_result(task, combined_text, total_cost)
+    return await save_result(
+        task,
+        combined_text,
+        float(usage.amount) if usage else total_cost,
+        usage.uid if usage else None,
+    )
 
 
 async def _transcribe_chunks(
@@ -422,6 +438,11 @@ async def process_transcription_webhook(
         provider=task.provider,
     )
     total_cost = transcription_cost + translation_cost
+    # The transcription already happened (Soniox was already paid) by the
+    # time this runs -- a billing-recording failure (transient outage, or
+    # actual usage running slightly over the pre-flight estimate) must be
+    # logged, not allowed to withhold a result that's already been produced.
+    usage = None
     try:
         usage = await finance.meter_cost(
             task.user_id,
@@ -434,8 +455,8 @@ async def process_transcription_webhook(
                 "audio_duration_ms": job_result.audio_duration_ms,
             },
         )
-    except httpx.HTTPStatusError:
-        return await save_error(task, "payment_required")
+    except Exception:
+        logging.exception("Failed to meter transcribe usage for task %s", task.uid)
     logging.info(
         "%s %s %s %s",
         task.uid,

@@ -9,6 +9,7 @@ and for the unmounted ``language.completion`` routes module.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 
 from apps.openai_compat.services import (
@@ -20,6 +21,8 @@ from apps.openai_compat.services import (
 from server.config import Settings
 from utils.billing import finance
 from utils.integrations import openrouter as openrouter_client
+
+logger = logging.getLogger(__name__)
 
 
 def _estimate_input_cost(payload: dict) -> float:
@@ -36,15 +39,18 @@ async def meter_completion_response(raw: bytes, *, user_id: str) -> None:
     if not isinstance(data, dict):
         return
     provider_meta = openrouter_client.extract_provider_meta(data, provider="openrouter")
-    await meter_chat_usage(
-        user_id=user_id,
-        model=str(provider_meta.get("model") or ""),
-        usage=provider_meta.get("usage")
-        if isinstance(provider_meta.get("usage"), dict)
-        else None,
-        provider_meta=provider_meta,
-        service="completion",
-    )
+    try:
+        await meter_chat_usage(
+            user_id=user_id,
+            model=str(provider_meta.get("model") or ""),
+            usage=provider_meta.get("usage")
+            if isinstance(provider_meta.get("usage"), dict)
+            else None,
+            provider_meta=provider_meta,
+            service="completion",
+        )
+    except Exception:
+        logger.exception("Failed to meter completion usage for %s", user_id)
 
 
 async def proxy_chat_completions(

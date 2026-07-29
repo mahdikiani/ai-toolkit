@@ -1,5 +1,6 @@
 """Unit tests for translation services."""
 
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -64,6 +65,53 @@ class TestProcessTranslate:
 
         assert result.task_status == TaskStatusEnum.error
         assert "translate.yaml" in result.error
+
+    async def test_insufficient_quota_stops_before_any_llm_call(
+        self, tmp_path: Path
+    ) -> None:
+        """
+        Regression check.
+
+        process_translate used to have no pre-flight quota check --
+        insufficient funds were only discovered (and not even blocked)
+        after the OpenRouter call already ran.
+        """
+        from apps.language.translate.services import process_translate
+
+        translate_yaml = tmp_path / "translate.yaml"
+        translate_yaml.write_text(
+            "task:\n"
+            "  system:\n"
+            "    persona: You are a translator\n"
+            "  user: 'Translate: {{ content }} to {{ language }}'\n"
+        )
+
+        task = MagicMock()
+        task.uid = "task_123"
+        task.user_id = "user_123"
+        task.text = "Hello world"
+        task.language = "Persian"
+        task.save = AsyncMock(return_value=task)
+
+        with (
+            patch("apps.language.translate.services.Settings") as mock_settings,
+            patch(
+                "apps.language.translate.services.finance.check_quota",
+                new_callable=AsyncMock,
+                return_value=Decimal("0"),
+            ),
+            patch(
+                "apps.language.translate.services.call_openrouter",
+                new_callable=AsyncMock,
+            ) as mock_call,
+        ):
+            mock_settings.prompts_dir = tmp_path
+
+            result = await process_translate(task)
+
+        mock_call.assert_not_awaited()
+        assert result.task_status == TaskStatusEnum.error
+        assert result.error == "insufficient_quota"
 
     async def test_translates_text_successfully(self, tmp_path: Path) -> None:
         """process_translate should translate text and set completed status."""
@@ -349,7 +397,14 @@ class TestTranslationErrorHandling:
         assert "must be a YAML mapping" in result.error
 
     async def test_handles_finance_metering_failure(self, tmp_path: Path) -> None:
-        """process_translate should handle finance metering failures gracefully."""
+        """
+        process_translate should still deliver the result when metering fails.
+
+        Regression check: this used to fail the whole task when
+        meter_cost raised, discarding an already-generated (already
+        paid for in OpenRouter cost) translation. The billing service
+        being unavailable is not the same as the translation failing.
+        """
         from apps.language.translate.services import process_translate
 
         translate_yaml = tmp_path / "translate.yaml"
@@ -370,6 +425,11 @@ class TestTranslationErrorHandling:
         with (
             patch("apps.language.translate.services.Settings") as mock_settings,
             patch(
+                "apps.language.translate.services.finance.check_quota",
+                new_callable=AsyncMock,
+                return_value=Decimal("999999"),
+            ),
+            patch(
                 "apps.language.translate.services.call_openrouter",
                 new_callable=AsyncMock,
                 return_value="Ciao mondo",
@@ -385,6 +445,6 @@ class TestTranslationErrorHandling:
 
             result = await process_translate(task)
 
-        # Should fail because metering is critical
-        assert result.task_status == TaskStatusEnum.error
-        assert "Metering service unavailable" in result.error
+        assert result.task_status == TaskStatusEnum.completed
+        assert result.result == "Ciao mondo"
+        assert result.usage_id is None

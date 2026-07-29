@@ -1,5 +1,7 @@
 """YouTube transcription services using youtube-transcript.io API."""
 
+import logging
+
 import httpx
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
@@ -9,6 +11,8 @@ from utils.billing import finance
 from .models import YoutubeTranscriptTask
 from .video_id import parse_youtube_video_id
 
+logger = logging.getLogger(__name__)
+
 
 async def process_youtube(task: YoutubeTranscriptTask) -> YoutubeTranscriptTask:
     """Fetch transcript from youtube-transcript.io and save the result."""
@@ -17,6 +21,15 @@ async def process_youtube(task: YoutubeTranscriptTask) -> YoutubeTranscriptTask:
         await task.update_and_emit(
             task_status=TaskStatusEnum.error,
             result="YouTube Transcript API key is not configured",
+        )
+        return task
+
+    amount = finance.estimate_youtube_cost()
+    quota = await finance.check_quota(task.user_id, amount, raise_exception=False)
+    if quota < amount:
+        await task.update_and_emit(
+            task_status=TaskStatusEnum.error,
+            result="insufficient_quota",
         )
         return task
 
@@ -71,16 +84,19 @@ async def process_youtube(task: YoutubeTranscriptTask) -> YoutubeTranscriptTask:
         item.get("text", "") for track in tracks for item in track.get("transcript", [])
     ]
 
-    amount = finance.estimate_youtube_cost()
-    usage = await finance.meter_cost(
-        task.user_id,
-        amount,
-        meta_data={
-            "service": "youtube",
-            "provider": "youtube-transcript.io",
-            "video_id": task.video_id,
-        },
-    )
+    usage = None
+    try:
+        usage = await finance.meter_cost(
+            task.user_id,
+            amount,
+            meta_data={
+                "service": "youtube",
+                "provider": "youtube-transcript.io",
+                "video_id": task.video_id,
+            },
+        )
+    except Exception:
+        logger.exception("Failed to meter youtube usage for task %s", task.uid)
 
     await task.update_and_emit(
         task_status=TaskStatusEnum.completed,

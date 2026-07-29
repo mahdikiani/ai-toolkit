@@ -18,6 +18,7 @@ from apps.language.chat.services import (
     thread_model,
 )
 from apps.language.completion import services as completion_services
+from utils.billing import finance
 
 
 @pytest.mark.unit
@@ -208,9 +209,10 @@ class TestCompletionProxyServices:
         ):
             chunks = [
                 chunk
-                async for chunk in completion_services.proxy_chat_completions_raw_stream(
-                    {"model": "m", "messages": []}
-                )
+                async for chunk in completion_services.proxy_chat_completions_raw_stream({
+                    "model": "m",
+                    "messages": [],
+                })
             ]
 
         joined = b"".join(chunks)
@@ -384,6 +386,93 @@ class TestCompleteAssistantMessage:
 
         assert isinstance(exc_info.value, BaseHTTPException)
         assert exc_info.value.status_code == 502
+
+    async def test_insufficient_quota_stops_before_calling_openrouter(self) -> None:
+        """
+        Regression check.
+
+        complete_assistant_message used to have no pre-flight quota
+        check at all -- a broke user could keep triggering real
+        OpenRouter spend indefinitely, with the service only
+        discovering (and not even enforcing) insufficient funds after
+        the fact.
+        """
+        thread = MagicMock()
+        thread.uid = "thread_uid_123"
+        thread.chat_model = "openai/gpt-4o-mini"
+
+        with (
+            patch(
+                "apps.language.chat.services.messages_as_openrouter",
+                new_callable=AsyncMock,
+                return_value=[{"role": "user", "content": "Hello"}],
+            ),
+            patch(
+                "apps.language.chat.services.finance.check_quota",
+                new_callable=AsyncMock,
+                side_effect=finance._insufficient_funds_error("not enough"),
+            ),
+            patch(
+                "apps.language.chat.services.openrouter_client.complete_chat_json",
+                new_callable=AsyncMock,
+            ) as mock_complete, pytest.raises(Exception, match="not enough")
+        ):
+            await complete_assistant_message(
+                thread=thread,
+                user_id="user_123",
+            )
+
+        mock_complete.assert_not_awaited()
+
+    async def test_metering_failure_still_delivers_the_message(self) -> None:
+        """
+        Regression check.
+
+        meter_cost failing used to propagate uncaught and discard an
+        already-generated (already-paid-for-in-OpenRouter-cost)
+        assistant reply.
+        """
+        thread = MagicMock()
+        thread.uid = "thread_uid_123"
+        thread.chat_model = "openai/gpt-4o-mini"
+
+        mock_openrouter_response = {
+            "choices": [{"message": {"content": "Hello back!"}}],
+            "model": "openai/gpt-4o-mini",
+            "usage": {"total_tokens": 20},
+        }
+        mock_created_msg = MagicMock()
+        mock_created_msg.content = "Hello back!"
+
+        with (
+            patch(
+                "apps.language.chat.services.messages_as_openrouter",
+                new_callable=AsyncMock,
+                return_value=[{"role": "user", "content": "Hello"}],
+            ),
+            patch(
+                "apps.language.chat.services.openrouter_client.complete_chat_json",
+                new_callable=AsyncMock,
+                return_value=mock_openrouter_response,
+            ),
+            patch(
+                "apps.language.chat.services.finance.meter_cost",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("billing service unreachable"),
+            ),
+            patch(
+                "apps.language.chat.services.ChatMessage.create_item",
+                new_callable=AsyncMock,
+                return_value=mock_created_msg,
+            ) as mock_create,
+        ):
+            result = await complete_assistant_message(
+                thread=thread,
+                user_id="user_123",
+            )
+
+        assert result == mock_created_msg
+        assert mock_create.call_args.args[0]["completion_extra"]["usage_id"] is None
 
 
 @pytest.mark.unit

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import zipfile
+from decimal import Decimal
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -110,9 +111,7 @@ class TestOpenAICompatAudio:
 
     async def test_create_transcription_requires_content(self) -> None:
         with pytest.raises(Exception) as exc:
-            await openai_audio.create_transcription(
-                b"", filename="a.wav", user_id="u1"
-            )
+            await openai_audio.create_transcription(b"", filename="a.wav", user_id="u1")
         assert exc.value.status_code == 400
 
     async def test_create_transcription_without_soniox_key(self) -> None:
@@ -219,7 +218,9 @@ class TestYoutubeServices:
         task.user_id = "u1"
         task.update_and_emit = AsyncMock(return_value=task)
 
-        with patch.object(youtube_services.Settings, "youtube_transcript_api_key", None):
+        with patch.object(
+            youtube_services.Settings, "youtube_transcript_api_key", None
+        ):
             result = await youtube_services.process_youtube(task)
 
         task.update_and_emit.assert_awaited_once()
@@ -265,4 +266,85 @@ class TestYoutubeServices:
 
         assert result is task
         task.update_and_emit.assert_awaited()
-        assert task.update_and_emit.await_args.kwargs["task_status"].value == "completed"
+        assert (
+            task.update_and_emit.await_args.kwargs["task_status"].value == "completed"
+        )
+
+    async def test_process_youtube_insufficient_quota_skips_the_request(self) -> None:
+        """Regression check: no pre-flight quota check used to exist at all."""
+        task = MagicMock()
+        task.video_id = "https://youtu.be/abc123"
+        task.user_id = "u1"
+        task.update_and_emit = AsyncMock(return_value=task)
+
+        with (
+            patch.object(
+                youtube_services.Settings, "youtube_transcript_api_key", "key"
+            ),
+            patch(
+                "apps.youtube.services.finance.check_quota",
+                new_callable=AsyncMock,
+                return_value=Decimal("0"),
+            ),
+            patch(
+                "apps.youtube.services.httpx.AsyncClient",
+            ) as client_cls,
+        ):
+            result = await youtube_services.process_youtube(task)
+
+        client_cls.assert_not_called()
+        assert result is task
+        kwargs = task.update_and_emit.await_args.kwargs
+        assert kwargs["task_status"].value == "error"
+        assert kwargs["result"] == "insufficient_quota"
+
+    async def test_process_youtube_metering_failure_still_delivers_transcript(
+        self,
+    ) -> None:
+        """
+        Regression check.
+
+        meter_cost failing used to propagate uncaught and discard an
+        already-fetched transcript.
+        """
+        task = MagicMock()
+        task.video_id = "https://youtu.be/abc123"
+        task.user_id = "u1"
+        task.update_and_emit = AsyncMock(return_value=task)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"tracks": [{"transcript": [{"text": "hello"}, {"text": "world"}]}]}
+        ]
+        mock_response.raise_for_status = MagicMock()
+
+        with (
+            patch.object(
+                youtube_services.Settings, "youtube_transcript_api_key", "key"
+            ),
+            patch(
+                "apps.youtube.services.httpx.AsyncClient",
+            ) as client_cls,
+            patch(
+                "apps.youtube.services.finance.estimate_youtube_cost",
+                return_value=1.0,
+            ),
+            patch(
+                "apps.youtube.services.finance.meter_cost",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("billing service unreachable"),
+            ),
+        ):
+            client = AsyncMock()
+            client.__aenter__.return_value = client
+            client.__aexit__.return_value = None
+            client.post = AsyncMock(return_value=mock_response)
+            client_cls.return_value = client
+
+            await youtube_services.process_youtube(task)
+
+        kwargs = task.update_and_emit.await_args.kwargs
+        assert kwargs["task_status"].value == "completed"
+        assert kwargs["result"] == "hello world"
+        assert kwargs["usage_id"] is None

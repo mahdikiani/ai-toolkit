@@ -1,5 +1,6 @@
 """Translation via the shared translate prompt + OpenRouter."""
 
+import logging
 from pathlib import Path
 
 from fastapi_mongo_base.tasks import TaskStatusEnum
@@ -11,6 +12,8 @@ from utils import texttools
 from utils.billing import finance
 
 from .models import TranslateTask
+
+logger = logging.getLogger(__name__)
 
 TRANSLATE_PROMPT = "translate.yaml"
 
@@ -65,6 +68,19 @@ async def process_translate(task: TranslateTask) -> TranslateTask:
         if max_tokens is not None:
             max_tokens = int(max_tokens)
 
+        estimated = finance.estimate_text_cost(
+            model=str(model or ""),
+            usage={"total_tokens": max(100, len(task.text) // 4) * 2},
+        )
+        quota = await finance.check_quota(
+            task.user_id, estimated, raise_exception=False
+        )
+        if quota < estimated:
+            task.error = "insufficient_quota"
+            task.task_status = TaskStatusEnum.error
+            await task.save()
+            return task
+
         openrouter_result = await call_openrouter(
             system_prompt,
             user_prompt,
@@ -87,15 +103,19 @@ async def process_translate(task: TranslateTask) -> TranslateTask:
             usage=provider_usage if isinstance(provider_usage, dict) else None,
             raw_cost=_text_cost_value(raw_cost),
         )
-        usage = await finance.meter_cost(
-            task.user_id,
-            amount,
-            meta_data={
-                "service": "translate",
-                "prompt": "translate",
-                "provider_meta": provider_meta,
-            },
-        )
+        usage = None
+        try:
+            usage = await finance.meter_cost(
+                task.user_id,
+                amount,
+                meta_data={
+                    "service": "translate",
+                    "prompt": "translate",
+                    "provider_meta": provider_meta,
+                },
+            )
+        except Exception:
+            logger.exception("Failed to meter translate usage for task %s", task.uid)
         await save_result(
             task,
             result,

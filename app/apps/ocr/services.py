@@ -10,6 +10,7 @@ from fastapi_mongo_base.tasks import TaskStatusEnum
 from server.config import Settings
 from utils import texttools
 from utils.billing import finance
+from utils.billing.saas import UsageSchema
 from utils.files import mime
 
 from .archive_services import process_compressed_archive
@@ -24,6 +25,24 @@ from .paddle_ocr_services import process_pages_with_paddle
 from .schemas import OcrEngineType
 
 logger = logging.getLogger(__name__)
+
+
+async def _meter_usage(
+    task: OcrTask, amount: float, meta_data: dict
+) -> UsageSchema | None:
+    """
+    Record usage cost for a task; never let a billing failure erase a result.
+
+    The OCR work (potentially many pages/minutes of VLM calls) has
+    already happened by the time this runs -- a transient billing
+    service outage must be logged, not allowed to propagate and mark an
+    otherwise-successful task as failed.
+    """
+    try:
+        return await finance.meter_cost(task.user_id, amount, meta_data=meta_data)
+    except Exception:
+        logger.exception("Failed to meter OCR usage for task %s", task.uid)
+        return None
 
 
 def _resolve_ocr_engine(task: OcrTask) -> OcrEngineType:
@@ -105,8 +124,8 @@ async def process_ocr(task: OcrTask) -> OcrTask:
             text_pages = await process_pages_batch(pages, max_concurrent=10)
 
         amount = finance.estimate_ocr_cost(pages=len(pages), engine=engine.value)
-        usage = await finance.meter_cost(
-            task.user_id,
+        usage = await _meter_usage(
+            task,
             amount,
             meta_data={
                 "service": "ocr",
@@ -228,8 +247,8 @@ async def _process_with_pipeline(
     )
 
     amount = finance.estimate_ocr_cost(pages=page_count, engine=engine.value)
-    usage = await finance.meter_cost(
-        task.user_id,
+    usage = await _meter_usage(
+        task,
         amount,
         meta_data={
             "service": "ocr",
@@ -318,8 +337,8 @@ async def _process_with_document_intelligence(
         shutil.rmtree(result.output_dir, ignore_errors=True)
 
     amount = finance.estimate_ocr_cost(pages=page_count, engine=engine.value)
-    usage = await finance.meter_cost(
-        task.user_id,
+    usage = await _meter_usage(
+        task,
         amount,
         meta_data={"service": "ocr", "engine": engine.value, "pages": page_count},
     )

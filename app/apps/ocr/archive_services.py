@@ -78,6 +78,21 @@ async def process_compressed_archive(
     upload_result = await media.upload_file(zip_buffer)
     shutil.rmtree(temp_dir, ignore_errors=True)
 
-    # Meter usage
-    await finance.meter_cost(task.user_id, total_pages)
-    return await save_result(task, upload_result)
+    # Meter usage -- via estimate_ocr_cost so archive OCR respects the
+    # same pricing config (markup, per-page rate) as direct-file OCR,
+    # instead of billing the raw page count as if it were coins. A
+    # metering failure must not erase the already-produced result.
+    amount = finance.estimate_ocr_cost(pages=total_pages)
+    usage = None
+    try:
+        usage = await finance.meter_cost(
+            task.user_id, amount, meta_data={"service": "ocr", "pages": total_pages}
+        )
+    except Exception:
+        logging.exception("Failed to meter archive OCR usage for task %s", task.uid)
+    return await save_result(
+        task,
+        upload_result,
+        usage_amount=float(usage.amount) if usage else None,
+        usage_id=usage.uid if usage else None,
+    )

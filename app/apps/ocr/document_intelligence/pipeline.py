@@ -48,6 +48,8 @@ class PageStats:
     layout_time: float
     vlm_time: float
     elements: list[dict] = field(default_factory=list)
+    failed: bool = False
+    error: str | None = None
 
 
 @dataclass
@@ -79,6 +81,7 @@ def summarize_stats(stats: PipelineStats, include_elements: bool = False) -> dic
     here when ``include_elements`` is set (Settings.ocr_di_output_debug).
     """
     pages_summary = []
+    failed_pages: list[int] = []
     for p in stats.pages:
         confidences = [e["confidence"] for e in p.elements]
         entry = {
@@ -89,7 +92,10 @@ def summarize_stats(stats: PipelineStats, include_elements: bool = False) -> dic
             "avg_confidence": round(sum(confidences) / len(confidences), 3)
             if confidences
             else None,
+            "failed": p.failed,
         }
+        if p.failed:
+            failed_pages.append(p.page_number)
         if include_elements:
             entry["elements"] = p.elements
         pages_summary.append(entry)
@@ -97,6 +103,7 @@ def summarize_stats(stats: PipelineStats, include_elements: bool = False) -> dic
         "pages": pages_summary,
         "render_time": round(stats.render_time, 3),
         "total_time": round(stats.total_time, 3),
+        "failed_pages": failed_pages,
     }
 
 
@@ -175,7 +182,27 @@ class DocumentIntelligencePipeline:
         page_asts: list[PageAST] = []
         page_stats: list[PageStats] = []
         for page in document.pages:
-            page_ast, page_stat = await self._process_page(page)
+            try:
+                page_ast, page_stat = await self._process_page(page)
+            except Exception:
+                # Each element call already retries transient failures (see
+                # ElementProcessor._call_with_retry); reaching here means
+                # retries were exhausted. A single unlucky page must not
+                # discard every other page's already-completed work in a
+                # potentially hours-long, thousand-call job -- isolate the
+                # failure to this page and keep going.
+                logger.exception(
+                    "Page %d failed after retries; skipping it, continuing document",
+                    page.page_number,
+                )
+                page_ast = PageAST(page_number=page.page_number, nodes=[])
+                page_stat = PageStats(
+                    page_number=page.page_number,
+                    layout_time=0.0,
+                    vlm_time=0.0,
+                    failed=True,
+                    error="processing failed after retries",
+                )
             page_asts.append(page_ast)
             page_stats.append(page_stat)
 

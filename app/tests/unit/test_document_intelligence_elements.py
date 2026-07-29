@@ -165,3 +165,76 @@ class TestDigitNormalization:
         # chart_data's own numeric payload is left untouched so exact
         # values (used for e.g. plotting) aren't altered.
         assert result.chart_data["data"][0]["label"] == "٤"
+
+
+@pytest.mark.document_intelligence
+class TestVlmCallRetry:
+    """
+    Tests for ElementProcessor._vlm_call's retry behavior.
+
+    Regression: a single transient failure (rate limit, network blip)
+    on any one of potentially thousands of VLM calls across a large
+    document used to kill the entire multi-hour job with nothing
+    salvaged -- there was no retry at all.
+    """
+
+    @pytest.fixture
+    def crop(self) -> Image.Image:
+        return Image.new("RGB", (10, 10))
+
+    async def test_retries_transient_failure_and_succeeds(
+        self, crop: Image.Image, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "apps.ocr.document_intelligence.elements.asyncio.sleep", AsyncMock()
+        )
+        client = AsyncMock()
+        client.complete_chat_json = AsyncMock(
+            side_effect=[
+                RuntimeError("rate limited"),
+                {"choices": [{"message": {"content": "ok"}}], "usage": {}},
+            ]
+        )
+        processor = ElementProcessor(vlm_model="test-model", openrouter_client=client)
+
+        result = await processor._vlm_call(crop, "sys", "user")
+
+        assert result == "ok"
+        assert client.complete_chat_json.await_count == 2
+
+    async def test_raises_after_exhausting_retries(
+        self, crop: Image.Image, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "apps.ocr.document_intelligence.elements.asyncio.sleep", AsyncMock()
+        )
+        client = AsyncMock()
+        client.complete_chat_json = AsyncMock(side_effect=RuntimeError("still down"))
+        processor = ElementProcessor(vlm_model="test-model", openrouter_client=client)
+
+        with pytest.raises(RuntimeError, match="still down"):
+            await processor._vlm_call(crop, "sys", "user")
+
+        assert client.complete_chat_json.await_count == 3
+
+    async def test_backoff_delay_increases_between_retries(
+        self, crop: Image.Image, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sleep_mock = AsyncMock()
+        monkeypatch.setattr(
+            "apps.ocr.document_intelligence.elements.asyncio.sleep", sleep_mock
+        )
+        client = AsyncMock()
+        client.complete_chat_json = AsyncMock(
+            side_effect=[
+                RuntimeError("e1"),
+                RuntimeError("e2"),
+                {"choices": [{"message": {"content": "ok"}}], "usage": {}},
+            ]
+        )
+        processor = ElementProcessor(vlm_model="test-model", openrouter_client=client)
+
+        await processor._vlm_call(crop, "sys", "user")
+
+        delays = [call.args[0] for call in sleep_mock.await_args_list]
+        assert delays == [2.0, 4.0]

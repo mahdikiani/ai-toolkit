@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import cache
 from io import BytesIO
@@ -15,6 +17,15 @@ from ..pipeline.normalization import normalize_persian, normalize_persian_digits
 from .layout import LayoutElement, LayoutType
 
 logger = logging.getLogger(__name__)
+
+# A document can be hundreds of pages / thousands of VLM calls -- over
+# that many calls, a transient failure (rate limit, network blip,
+# provider hiccup) is expected to happen at least once. Without retry,
+# any single element's failure kills the entire multi-hour job with
+# nothing salvaged, which is why retry lives at the call level rather
+# than only at the page/document level.
+_MAX_VLM_RETRIES = 3
+_VLM_RETRY_BACKOFF_SECONDS = 2.0
 
 TEXT_TYPES = {
     LayoutType.title,
@@ -169,6 +180,30 @@ class ElementProcessor:
         })
         return result
 
+    @staticmethod
+    async def _call_with_retry(
+        call_fn: Callable[[dict], Awaitable[dict]], body: dict
+    ) -> dict:
+        """Call a complete_chat_json-shaped function with retry + backoff."""
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_VLM_RETRIES):
+            try:
+                return await call_fn(body)
+            except Exception as exc:
+                last_exc = exc
+                if attempt < _MAX_VLM_RETRIES - 1:
+                    delay = _VLM_RETRY_BACKOFF_SECONDS * (2**attempt)
+                    logger.warning(
+                        "VLM call failed (attempt %d/%d), retrying in %.1fs: %s",
+                        attempt + 1,
+                        _MAX_VLM_RETRIES,
+                        delay,
+                        exc,
+                    )
+                    await asyncio.sleep(delay)
+        assert last_exc is not None  # ruff: ignore[assert] -- loop always sets it before exit
+        raise last_exc
+
     async def _vlm_call(
         self,
         crop: Image.Image,
@@ -183,34 +218,6 @@ class ElementProcessor:
 
         b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
         data_url = f"data:image/jpeg;base64,{b64}"
-
-        if self.client:
-            body = {
-                "model": self.vlm_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": data_url, "detail": "high"},
-                            },
-                        ],
-                    },
-                ],
-                "max_tokens": max_tokens,
-                "temperature": 0.0,
-            }
-            if response_format:
-                body["response_format"] = response_format
-            data = await self.client.complete_chat_json(body)
-            content = data["choices"][0]["message"]["content"].strip()
-            self._last_tokens = data.get("usage", {}).get("total_tokens", 0)
-            return content
-
-        from utils.integrations.openrouter import complete_chat_json
 
         body = {
             "model": self.vlm_model,
@@ -232,7 +239,13 @@ class ElementProcessor:
         }
         if response_format:
             body["response_format"] = response_format
-        data = await complete_chat_json(body)
+
+        if self.client:
+            call_fn = self.client.complete_chat_json
+        else:
+            from utils.integrations.openrouter import complete_chat_json as call_fn
+
+        data = await self._call_with_retry(call_fn, body)
         content = data["choices"][0]["message"]["content"].strip()
         self._last_tokens = data.get("usage", {}).get("total_tokens", 0)
         return content

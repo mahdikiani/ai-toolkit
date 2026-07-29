@@ -167,3 +167,80 @@ class TestDocumentIntelligencePipeline:
         report = run_docx_qa(result.document_ast, result.docx_bytes, mode="semantic")
 
         assert report.passed, report.failures()
+
+
+@pytest.mark.document_intelligence
+class TestPageFaultIsolation:
+    """
+    Regression check.
+
+    A single page failing after exhausted VLM retries used to abort
+    the entire document, discarding every other already-processed page
+    in what can be a multi-hour, thousand-call job for a large PDF.
+    """
+
+    async def test_one_failed_page_does_not_abort_the_document(self) -> None:
+        from apps.ocr.document_intelligence.loader import Document, Page
+
+        pages = [
+            Page(
+                id=f"p{i}",
+                page_number=i,
+                image=Image.new("RGB", (600, 800), "white"),
+                width=600,
+                height=800,
+            )
+            for i in range(1, 4)
+        ]
+        fake_document = Document(
+            id="doc1",
+            filename="test.pdf",
+            pages=pages,
+            pages_count=3,
+            created_at="now",
+        )
+
+        pipeline = DocumentIntelligencePipeline(dpi=100)
+        try:
+            original_process_page = pipeline._process_page
+
+            async def flaky_process_page(page):
+                if page.page_number == 2:
+                    error = RuntimeError("VLM exhausted retries")
+                    raise error
+                return await original_process_page(page)
+
+            with (
+                patch(
+                    "apps.ocr.document_intelligence.pipeline.load_document",
+                    return_value=fake_document,
+                ),
+                patch(
+                    "apps.ocr.document_intelligence.layout.LayoutDetector.detect_page",
+                    _fake_detect_page,
+                ),
+                patch(
+                    "apps.ocr.document_intelligence.elements.ElementProcessor._vlm_call",
+                    _fake_vlm_call,
+                ),
+                patch.object(pipeline, "_process_page", flaky_process_page),
+            ):
+                result = await pipeline.process(_blank_image(), "test.pdf")
+        finally:
+            pipeline.cleanup()
+
+        assert len(result.stats.pages) == 3
+        failed = [p for p in result.stats.pages if p.failed]
+        assert [p.page_number for p in failed] == [2]
+        succeeded = {p.page_number for p in result.stats.pages if not p.failed}
+        assert succeeded == {1, 3}
+
+        summary = summarize_stats(result.stats)
+        assert summary["failed_pages"] == [2]
+
+        # the two successful pages' content still made it into the
+        # final markdown -- only page 2's content is missing. Each
+        # successful page contributes two "سلام دنیا" occurrences (the
+        # title element and the paragraph element both resolve to the
+        # same fake OCR text), so two successful pages -> four.
+        assert result.markdown.count("سلام دنیا") == 4

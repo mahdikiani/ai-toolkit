@@ -14,7 +14,9 @@ class WebSearchTaskSchemaCreate(TaskCreateFieldsMixin):
     exclude_domains: list[str] | None = None
 
 
-class WebSearchTaskSchema(TenantUserEntitySchema, TaskMixin, WebSearchTaskSchemaCreate):
+class WebSearchTaskSchema(
+    TenantUserEntitySchema, TaskMixin, WebSearchTaskSchemaCreate
+):
     """Complete web search task schema with lifecycle tracking."""
 
     result: dict | None = None

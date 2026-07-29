@@ -751,16 +751,101 @@ class TestSessionTitleHelpers:
         assert result.title == "Quantum Computing"
 
     async def test_maybe_apply_skips_when_has_title_false(self) -> None:
-        """maybe_apply_session_title_if_ready should not set title when not ready."""
+        """
+        maybe_apply_session_title_if_ready should not set a title when
+        not ready AND the conversation is still short of the fallback
+        threshold.
+        """
         session = MagicMock()
         session.title = None
         session.suggest_title = True
         thread = MagicMock()
 
-        with patch(
-            "apps.language.chat.services.evaluate_session_title",
-            new_callable=AsyncMock,
-            return_value=SessionTitleSuggestion(has_title=False),
+        with (
+            patch(
+                "apps.language.chat.services.evaluate_session_title",
+                new_callable=AsyncMock,
+                return_value=SessionTitleSuggestion(has_title=False),
+            ),
+            patch(
+                "apps.language.chat.services.messages_as_openrouter",
+                new_callable=AsyncMock,
+                return_value=[{"role": "user", "content": "hi"}],
+            ),
+        ):
+            result = await maybe_apply_session_title_if_ready(
+                session=session,
+                thread=thread,
+                user_id="user_1",
+            )
+
+        assert result.title is None
+        session.save.assert_not_called()
+
+    async def test_maybe_apply_falls_back_after_enough_messages(self) -> None:
+        """
+        Regression check.
+
+        The LLM can keep saying "not specific enough" indefinitely for
+        a short/ambiguous conversation -- after enough messages without
+        a natural title, a session must still end up with *some* real
+        title instead of staying "بدون عنوان" forever.
+        """
+        session = MagicMock()
+        session.title = None
+        session.suggest_title = True
+        session.save = AsyncMock()
+        thread = MagicMock()
+
+        with (
+            patch(
+                "apps.language.chat.services.evaluate_session_title",
+                new_callable=AsyncMock,
+                return_value=SessionTitleSuggestion(has_title=False),
+            ),
+            patch(
+                "apps.language.chat.services.messages_as_openrouter",
+                new_callable=AsyncMock,
+                return_value=[
+                    {"role": "user", "content": "how do I center a div in css"},
+                    {"role": "assistant", "content": "..."},
+                    {"role": "user", "content": "still not working"},
+                    {"role": "assistant", "content": "..."},
+                ],
+            ),
+        ):
+            result = await maybe_apply_session_title_if_ready(
+                session=session,
+                thread=thread,
+                user_id="user_1",
+            )
+
+        assert result.title == "how do I center a div in css"
+        session.save.assert_called_once()
+
+    async def test_maybe_apply_fallback_skips_when_no_user_content(self) -> None:
+        """No user message content to fall back to -- title stays unset."""
+        session = MagicMock()
+        session.title = None
+        session.suggest_title = True
+        thread = MagicMock()
+
+        with (
+            patch(
+                "apps.language.chat.services.evaluate_session_title",
+                new_callable=AsyncMock,
+                return_value=SessionTitleSuggestion(has_title=False),
+            ),
+            patch(
+                "apps.language.chat.services.messages_as_openrouter",
+                new_callable=AsyncMock,
+                return_value=[
+                    {"role": "assistant", "content": "..."},
+                    {"role": "assistant", "content": "..."},
+                    {"role": "assistant", "content": "..."},
+                    {"role": "assistant", "content": "..."},
+                ],
+            ),
         ):
             result = await maybe_apply_session_title_if_ready(
                 session=session,

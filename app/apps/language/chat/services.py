@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 SESSION_TITLE_PROMPT = "chat_session_title.yaml"
 
+# After this many messages with still no LLM-judged title, guarantee a
+# fallback title (see maybe_apply_session_title_if_ready) instead of
+# leaving the session untitled indefinitely.
+_TITLE_FALLBACK_AFTER_MESSAGES = 4
+
 
 @dataclass(frozen=True)
 class SessionTitleSuggestion:
@@ -148,7 +153,18 @@ async def maybe_apply_session_title_if_ready(
     thread: ChatThread,
     user_id: str,
 ) -> ChatSession:
-    """Set session.title when the title prompt says the topic is specific enough."""
+    """
+    Set session.title once the topic is clear -- guaranteed eventually.
+
+    evaluate_session_title asks an LLM whether the conversation is
+    specific enough yet, and is re-run on every message while
+    session.title stays None -- by design, it keeps saying no for
+    generic openers ("hi", "سلام"). Left alone, a short or ambiguous
+    conversation could stay "بدون عنوان" (untitled) indefinitely. After
+    a couple of exchanges without a natural title, fall back to the
+    first user message itself so every session ends up with a real
+    title, not just the ones the LLM judges "interesting enough."
+    """
     if session.title is not None or not session.suggest_title:
         return session
 
@@ -156,6 +172,18 @@ async def maybe_apply_session_title_if_ready(
     if suggestion.has_title and suggestion.title:
         session.title = suggestion.title
         await session.save()
+        return session
+
+    messages = await messages_as_openrouter(thread)
+    if len(messages) >= _TITLE_FALLBACK_AFTER_MESSAGES:
+        first_user_message = next(
+            (m["content"] for m in messages if m.get("role") == "user"), ""
+        )
+        fallback_title = first_user_message.strip()[:60]
+        if fallback_title:
+            session.title = fallback_title
+            await session.save()
+
     return session
 
 

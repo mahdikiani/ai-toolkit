@@ -42,7 +42,7 @@ class Settings(config.Settings):
         "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
     )
     default_model: str = os.getenv("DEFAULT_MODEL", "openai/gpt-4o-mini")
-    title_model: str = os.getenv("OPENROUTER_TITLE_MODEL", "google/gemma-2-9b-it:free")
+    title_model: str = os.getenv("OPENROUTER_TITLE_MODEL", "openai/gpt-5.6-terra")
     soniox_api_key: str | None = os.getenv("SONIOX_API_KEY")
     soniox_webhook_secret: str | None = os.getenv("SONIOX_WEBHOOK_SECRET")
     soniox_ws_url: str = os.getenv(

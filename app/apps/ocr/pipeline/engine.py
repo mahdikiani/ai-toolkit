@@ -185,9 +185,7 @@ class DocumentPipeline:
                 "image_bytes": img_bytes,
                 "type": elem.type.value,
             })
-            assembled.append(
-                f"![{elem.type.value} در صفحه {page_number}]({asset_id})"
-            )
+            assembled.append(f"![{elem.type.value} در صفحه {page_number}]({asset_id})")
             return
 
         buf = BytesIO()

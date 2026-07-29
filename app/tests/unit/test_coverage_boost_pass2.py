@@ -18,6 +18,7 @@ class TestOcrServicesCoverage:
     @pytest.mark.asyncio
     async def test_process_ocr_branches(self) -> None:
         from apps.ocr import services as svc
+
         task = SimpleNamespace(
             uid="t1",
             user_id="u1",
@@ -32,10 +33,10 @@ class TestOcrServicesCoverage:
         )
 
         with (
-            patch("apps.ocr.services.mime.check_file_type", return_value="application/zip"),
             patch(
-                "apps.ocr.services.is_compressed_file", return_value=True
+                "apps.ocr.services.mime.check_file_type", return_value="application/zip"
             ),
+            patch("apps.ocr.services.is_compressed_file", return_value=True),
             patch(
                 "apps.ocr.services.process_compressed_archive",
                 AsyncMock(return_value=task),
@@ -49,15 +50,15 @@ class TestOcrServicesCoverage:
             patch("apps.ocr.services.is_compressed_file", return_value=False),
             patch("apps.ocr.services.is_ocr_required", return_value=False),
             patch("apps.ocr.services.process_direct_file", return_value="txt"),
-            patch(
-                "apps.ocr.services.texttools.normalize_text", return_value="txt"
-            ),
+            patch("apps.ocr.services.texttools.normalize_text", return_value="txt"),
         ):
             out = await svc.process_ocr(task)
             assert out.result == "txt"
 
         with (
-            patch("apps.ocr.services.mime.check_file_type", return_value="application/pdf"),
+            patch(
+                "apps.ocr.services.mime.check_file_type", return_value="application/pdf"
+            ),
             patch("apps.ocr.services.is_compressed_file", return_value=False),
             patch("apps.ocr.services.is_ocr_required", return_value=True),
             patch(
@@ -70,7 +71,9 @@ class TestOcrServicesCoverage:
             pipe.assert_awaited()
 
         with (
-            patch("apps.ocr.services.mime.check_file_type", return_value="application/pdf"),
+            patch(
+                "apps.ocr.services.mime.check_file_type", return_value="application/pdf"
+            ),
             patch("apps.ocr.services.is_compressed_file", return_value=False),
             patch("apps.ocr.services.is_ocr_required", return_value=True),
             patch(
@@ -145,9 +148,7 @@ class TestOcrServicesCoverage:
         usage = SimpleNamespace(amount=1.5, uid="usage1")
 
         with (
-            patch(
-                "apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=0
-            ),
+            patch("apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=0),
         ):
             out = await svc._process_with_pipeline(
                 task, BytesIO(b"%PDF"), "application/pdf", OcrEngineType.pipeline
@@ -155,9 +156,7 @@ class TestOcrServicesCoverage:
             assert out is task
 
         with (
-            patch(
-                "apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=2
-            ),
+            patch("apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=2),
             patch("apps.ocr.services.finance.check_quota", AsyncMock(return_value=0)),
         ):
             out = await svc._process_with_pipeline(
@@ -168,9 +167,7 @@ class TestOcrServicesCoverage:
         fake_pipe.process_pdf = AsyncMock(return_value="md")
         fake_pipe.process_image_bytes = AsyncMock(return_value="md")
         with (
-            patch(
-                "apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=1
-            ),
+            patch("apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=1),
             patch("apps.ocr.services.finance.check_quota", AsyncMock(return_value=10)),
             patch(
                 "apps.ocr.pipeline.engine.DocumentPipeline",
@@ -185,9 +182,7 @@ class TestOcrServicesCoverage:
                 "apps.ocr.services.finance.meter_cost",
                 AsyncMock(return_value=usage),
             ),
-            patch(
-                "apps.ocr.services.texttools.normalize_text", return_value="md"
-            ),
+            patch("apps.ocr.services.texttools.normalize_text", return_value="md"),
         ):
             out = await svc._process_with_pipeline(
                 task, BytesIO(b"%PDF"), "application/pdf", OcrEngineType.pipeline
@@ -215,9 +210,7 @@ class TestOcrServicesCoverage:
         (tmp_path / "out").mkdir(exist_ok=True)
 
         with (
-            patch(
-                "apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=1
-            ),
+            patch("apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=1),
             patch("apps.ocr.services.finance.check_quota", AsyncMock(return_value=10)),
             patch(
                 "apps.ocr.document_intelligence.DocumentIntelligencePipeline",
@@ -240,9 +233,7 @@ class TestOcrServicesCoverage:
                 "apps.ocr.services.finance.meter_cost",
                 AsyncMock(return_value=usage),
             ),
-            patch(
-                "apps.ocr.services.texttools.normalize_text", return_value="di-md"
-            ),
+            patch("apps.ocr.services.texttools.normalize_text", return_value="di-md"),
         ):
             out = await svc._process_with_document_intelligence(
                 task,
@@ -254,9 +245,7 @@ class TestOcrServicesCoverage:
 
         di.process = AsyncMock(side_effect=RuntimeError("fail"))
         with (
-            patch(
-                "apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=1
-            ),
+            patch("apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=1),
             patch("apps.ocr.services.finance.check_quota", AsyncMock(return_value=10)),
             patch(
                 "apps.ocr.document_intelligence.DocumentIntelligencePipeline",
@@ -272,9 +261,7 @@ class TestOcrServicesCoverage:
             assert out is task
 
         with (
-            patch(
-                "apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=0
-            ),
+            patch("apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=0),
         ):
             await svc._process_with_document_intelligence(
                 task,
@@ -283,9 +270,7 @@ class TestOcrServicesCoverage:
                 OcrEngineType.document_intelligence,
             )
         with (
-            patch(
-                "apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=2
-            ),
+            patch("apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=2),
             patch("apps.ocr.services.finance.check_quota", AsyncMock(return_value=0)),
         ):
             await svc._process_with_document_intelligence(
@@ -353,9 +338,7 @@ class TestDiLayoutDetectorCoverage:
         model.predict.side_effect = RuntimeError("fail")
         assert det._run_model(img, page, "PP-DocLayoutV2") == []
 
-        with patch(
-            "apps.ocr.document_intelligence.layout.LayoutDetector"
-        ) as cls:
+        with patch("apps.ocr.document_intelligence.layout.LayoutDetector") as cls:
             cls.return_value = MagicMock()
             load_layout_detector(0.5)
             cls.assert_called()
@@ -381,9 +364,7 @@ class TestOpenRouterCoverage:
         assert orc.parse_sse_delta_line(": comment") is None
         assert orc.parse_sse_delta_line("data: [DONE]") == "[DONE]"
         assert (
-            orc.parse_sse_delta_line(
-                'data: {"choices":[{"delta":{"content":"hi"}}]}'
-            )
+            orc.parse_sse_delta_line('data: {"choices":[{"delta":{"content":"hi"}}]}')
             == "hi"
         )
         assert orc.parse_sse_delta_line("data: {bad") is None
@@ -594,9 +575,7 @@ class TestChatRoutesCoverage:
             "apps.language.chat.routes.ChatThread.create_item",
             AsyncMock(return_value=thread),
         ):
-            data = SimpleNamespace(
-                model_dump=lambda exclude_none=True: {"title": "n"}
-            )
+            data = SimpleNamespace(model_dump=lambda exclude_none=True: {"title": "n"})
             assert await router.create_thread(request, "s1", data) is thread
 
         with patch(
@@ -710,7 +689,9 @@ class TestMiscSmallModules:
             resp = await cr.openai_compatible_chat_completions(req, user)
             assert resp.status_code == 200
 
-        req.json = AsyncMock(side_effect=__import__("json").JSONDecodeError("e", "d", 0))
+        req.json = AsyncMock(
+            side_effect=__import__("json").JSONDecodeError("e", "d", 0)
+        )
         from fastapi_mongo_base.errors import BadRequestError
 
         with pytest.raises(BadRequestError):
@@ -751,18 +732,18 @@ class TestMiscSmallModules:
         assert hints2
 
         soniox = MagicMock()
-        job_ok = SimpleNamespace(status=__import__(
-            "soniox.types", fromlist=["TranscriptionJobStatus"]
-        ).TranscriptionJobStatus.COMPLETED)
+        job_ok = SimpleNamespace(
+            status=__import__(
+                "soniox.types", fromlist=["TranscriptionJobStatus"]
+            ).TranscriptionJobStatus.COMPLETED
+        )
         soniox.get_transcription_job_async = AsyncMock(return_value=job_ok)
         with (
             patch(
                 "apps.openai_compat.audio.transcribe_services.get_soniox_client",
                 return_value=soniox,
             ),
-            patch.object(
-                aud.Settings, "transcribe_poll_interval_seconds", 0
-            ),
+            patch.object(aud.Settings, "transcribe_poll_interval_seconds", 0),
         ):
             assert await aud._poll_transcription("j1") is job_ok
 
@@ -809,9 +790,7 @@ class TestMiscSmallModules:
         bio.seek(0)
 
         with (
-            patch(
-                "apps.ocr.ocr_services._read_ocr_prompt", return_value="p"
-            ),
+            patch("apps.ocr.ocr_services._read_ocr_prompt", return_value="p"),
             patch(
                 "apps.ocr.ocr_services._ocr_attempt",
                 AsyncMock(side_effect=[(None, True), ("ok", False)]),
@@ -827,9 +806,7 @@ class TestMiscSmallModules:
             patch(
                 "apps.ocr.ocr_services.complete_chat_json",
                 AsyncMock(
-                    return_value={
-                        "choices": [{"message": {"content": " clean "}}]
-                    }
+                    return_value={"choices": [{"message": {"content": " clean "}}]}
                 ),
             ),
         ):

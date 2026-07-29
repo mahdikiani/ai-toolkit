@@ -1,5 +1,6 @@
 """Reading order reconstruction for Persian/RTL documents."""
 
+import itertools
 import logging
 
 from .layout_detector import ElementType, LayoutBox
@@ -77,11 +78,21 @@ class ReadingOrderResolver:
         span = max(centers) - min(centers)
         if span < 100:
             return []
+        centers_sorted = sorted(centers)
+        gaps = [b - a for a, b in itertools.pairwise(centers_sorted)]
+        gap_threshold = span * 0.35
+        if not gaps or max(gaps) < gap_threshold:
+            return []
         try:
             from sklearn.cluster import KMeans
 
+            n_large_gaps = sum(1 for gap in gaps if gap >= gap_threshold)
+            n_clusters = min(3, len(elements), n_large_gaps + 1)
+            if n_clusters < 2:
+                return []
+
             x_centers = [[(e.x1 + e.x2) / 2] for e in elements]
-            kmeans = KMeans(n_clusters=min(3, len(elements)), n_init=1, random_state=0)
+            kmeans = KMeans(n_clusters=n_clusters, n_init=1, random_state=0)
             labels = kmeans.fit_predict(x_centers)
             cols: dict[int, list[LayoutBox]] = {}
             for elem, label in zip(elements, labels, strict=False):

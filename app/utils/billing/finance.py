@@ -56,6 +56,15 @@ DEFAULT_PRICING: PricingConfig = {
     "youtube": {
         "per_request": 1.0,
     },
+    "image": {
+        "markup": 1.0,
+        "default_per_image": 1.0,
+        "models": {},
+    },
+    "web_search": {
+        "markup": 1.0,
+        "default_per_search": 1.0,
+    },
 }
 
 

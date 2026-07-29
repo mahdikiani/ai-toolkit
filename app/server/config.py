@@ -45,11 +45,23 @@ class Settings(config.Settings):
     title_model: str = os.getenv("OPENROUTER_TITLE_MODEL", "google/gemma-2-9b-it:free")
     soniox_api_key: str | None = os.getenv("SONIOX_API_KEY")
     soniox_webhook_secret: str | None = os.getenv("SONIOX_WEBHOOK_SECRET")
+    soniox_ws_url: str = os.getenv(
+        "SONIOX_WS_URL", "wss://stt-rt.soniox.com/transcribe-websocket"
+    )
+    soniox_rt_model: str = os.getenv("SONIOX_RT_MODEL", "stt-rt-v5")
+    soniox_rt_language_hints: ClassVar[list[str]] = json.loads(
+        os.getenv("SONIOX_RT_LANGUAGE_HINTS", '["fa", "en"]')
+    )
+    soniox_rt_max_buffer_bytes: int = int(
+        os.getenv("SONIOX_RT_MAX_BUFFER_BYTES", str(50 * 1024 * 1024))
+    )
     openai_compat_models: str = os.getenv("OPENAI_COMPAT_MODELS", "")
     openai_stream_max_bytes: int = int(
         os.getenv("OPENAI_STREAM_MAX_BYTES", str(8 * 1024 * 1024))
     )
     default_tts_model: str = os.getenv("DEFAULT_TTS_MODEL", "openai/gpt-4o-mini-tts")
+
+    exa_api_key: str | None = os.getenv("EXA_API_KEY")
 
     ocr_engine: str = os.getenv("OCR_ENGINE", "pipeline")
     ocr_pipeline_dpi: int = int(os.getenv("OCR_PIPELINE_DPI", "300"))

@@ -52,13 +52,9 @@ class TestPass3UtilsAndRoutes:
         with pytest.raises(vid.YouTubeVideoIdRequiredError):
             vid.parse_youtube_video_id("  ")
         assert vid.parse_youtube_video_id("abc123") == "abc123"
+        assert vid.parse_youtube_video_id("https://youtu.be/watchid01") == "watchid01"
         assert (
-            vid.parse_youtube_video_id("https://youtu.be/watchid01") == "watchid01"
-        )
-        assert (
-            vid.parse_youtube_video_id(
-                "https://www.youtube.com/watch?v=watchid02&t=1"
-            )
+            vid.parse_youtube_video_id("https://www.youtube.com/watch?v=watchid02&t=1")
             == "watchid02"
         )
         assert (
@@ -139,7 +135,9 @@ class TestPass3UtilsAndRoutes:
         }
 
         req = MagicMock()
-        req.json = AsyncMock(return_value={"messages": [{"role": "user", "content": "h"}]})
+        req.json = AsyncMock(
+            return_value={"messages": [{"role": "user", "content": "h"}]}
+        )
         with patch(
             "apps.openai_compat.routes.services.handle_non_stream_chat",
             AsyncMock(return_value={"ok": 1}),
@@ -159,7 +157,9 @@ class TestPass3UtilsAndRoutes:
         ):
             assert await oc.chat_completions(req, user) == {"stream": 1}
 
-        req.json = AsyncMock(side_effect=__import__("json").JSONDecodeError("e", "d", 0))
+        req.json = AsyncMock(
+            side_effect=__import__("json").JSONDecodeError("e", "d", 0)
+        )
         from fastapi_mongo_base.core.exceptions import BaseHTTPException
 
         with pytest.raises(BaseHTTPException):
@@ -179,7 +179,9 @@ class TestPass3UtilsAndRoutes:
             await oc.audio_speech(req, user)
             speech.assert_awaited()
 
-        req.json = AsyncMock(side_effect=__import__("json").JSONDecodeError("e", "d", 0))
+        req.json = AsyncMock(
+            side_effect=__import__("json").JSONDecodeError("e", "d", 0)
+        )
         with pytest.raises(BaseHTTPException):
             await oc.audio_speech(req, user)
         req.json = AsyncMock(return_value=["x"])
@@ -207,9 +209,7 @@ class TestPass3UtilsAndRoutes:
         from apps.openai_compat import audio as aud
 
         soniox = MagicMock()
-        soniox.transcribe_file_async = AsyncMock(
-            return_value=SimpleNamespace(id="j1")
-        )
+        soniox.transcribe_file_async = AsyncMock(return_value=SimpleNamespace(id="j1"))
         soniox.get_transcription_result_async = AsyncMock(
             return_value=SimpleNamespace(text="hello", tokens=None)
         )

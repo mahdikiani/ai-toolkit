@@ -13,6 +13,7 @@ from server.config import Settings
 from utils.usso import get_usso
 
 from . import audio as audio_api
+from . import images as images_api
 from . import services
 
 router = APIRouter(prefix="/openai/v1", tags=["OpenAI Compatible"])
@@ -136,4 +137,51 @@ async def audio_transcriptions(
         model=model,
         language=language,
         response_format=response_format,
+    )
+
+
+@router.post("/images/generations")
+async def image_generations(
+    request: Request,
+    user: UserData = Depends(auth),
+) -> object:
+    """OpenAI-compatible image generation via OpenRouter."""
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as exc:
+        raise services.openai_error(
+            400, "invalid_request_error", "Invalid JSON body"
+        ) from exc
+    if not isinstance(body, dict):
+        raise services.openai_error(
+            400, "invalid_request_error", "Body must be a JSON object"
+        )
+    user_id = getattr(user, "uid", None) or getattr(user, "user_id", "")
+    return await images_api.create_generation(body, user_id=user_id)
+
+
+@router.post("/images/edits")
+async def image_edits(
+    user: UserData = Depends(auth),
+    file: UploadFile = File(...),
+    prompt: str = Form(...),
+    mask: UploadFile | None = File(None),
+    model: str | None = Form(None),
+    n: int = Form(1),
+    size: str = Form("1024x1024"),
+    response_format: str = Form("url"),
+) -> object:
+    """OpenAI-compatible image edits via OpenRouter."""
+    user_id = getattr(user, "uid", None) or getattr(user, "user_id", "")
+    image_bytes = await file.read()
+    mask_bytes = await mask.read() if mask else None
+    body = {
+        "prompt": prompt,
+        "model": model or "openai/dall-e-2",
+        "n": n,
+        "size": size,
+        "response_format": response_format,
+    }
+    return await images_api.create_edit(
+        body, user_id=user_id, image_bytes=image_bytes, mask_bytes=mask_bytes
     )

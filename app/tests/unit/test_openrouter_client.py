@@ -111,8 +111,7 @@ class TestOpenRouterHTTP:
             side_effect=fake_iter,
         ):
             chunks = [
-                chunk
-                async for chunk in or_client.stream_chat_deltas({"model": "m"})
+                chunk async for chunk in or_client.stream_chat_deltas({"model": "m"})
             ]
 
         assert chunks == ["hello"]

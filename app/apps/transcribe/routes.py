@@ -3,7 +3,15 @@
 import base64
 from io import BytesIO
 
-from fastapi import BackgroundTasks, Depends, File, Query, Request, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    File,
+    Query,
+    Request,
+    UploadFile,
+    WebSocket,
+)
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from fastapi_mongo_base.routes import PaginatedResponse
 from pydantic import BaseModel
@@ -15,6 +23,7 @@ from utils.task_routes import AbstractTaskUSSORouter
 
 from . import services
 from .models import TranscribeTask
+from .realtime import handle_realtime_session
 from .schemas import (
     TranscribeTaskBase64Schema,
     TranscribeTaskSchema,
@@ -69,6 +78,11 @@ class TranscribeRouter(AbstractTaskUSSORouter):
             self.get_result,
             methods=["GET"],
         )
+        self.router.add_api_websocket_route("/realtime", self.realtime)
+
+    async def realtime(self, websocket: WebSocket) -> None:
+        """Proxy live audio to Soniox realtime STT after USSO authentication."""
+        await handle_realtime_session(websocket)
 
     async def list_items(
         self,

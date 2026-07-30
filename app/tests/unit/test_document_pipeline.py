@@ -44,6 +44,91 @@ class TestDocumentPipeline:
         assert captured_hints[0] is not None
         assert captured_hints[1] is not None
 
+    async def test_on_page_done_called_after_every_page(self) -> None:
+        """Progress callback fires with (page_num, total) after each page."""
+        pipeline = DocumentPipeline(
+            enable_preprocessing=False,
+            enable_layout=False,
+            enable_normalization=False,
+            pipeline_ocr_fn=AsyncMock(return_value="text"),
+        )
+        images = [Image.new("RGB", (50, 50)) for _ in range(3)]
+        progress_calls: list[tuple[int, int]] = []
+
+        async def on_page_done(page_num: int, total: int) -> None:
+            progress_calls.append((page_num, total))
+
+        await pipeline._process_images(images, on_page_done=on_page_done)
+
+        assert progress_calls == [(1, 3), (2, 3), (3, 3)]
+
+    async def test_one_failed_page_does_not_abort_the_document(self) -> None:
+        """A single page's unexpected exception is isolated, not fatal."""
+        pipeline = DocumentPipeline(
+            enable_preprocessing=False,
+            enable_layout=False,
+            enable_normalization=False,
+            pipeline_ocr_fn=AsyncMock(return_value="page text"),
+        )
+        images = [Image.new("RGB", (50, 50)) for _ in range(3)]
+        original_process_page = pipeline._process_page
+
+        async def flaky_process_page(image: object, page_number: int) -> object:
+            if page_number == 2:
+                error = RuntimeError("corrupt page")
+                raise error
+            return await original_process_page(image, page_number)
+
+        pipeline._process_page = flaky_process_page
+
+        result = await pipeline._process_images(images)
+
+        assert "page text" in result
+        assert "صفحه 2" in result
+
+    async def test_progress_callback_failure_does_not_abort_the_document(self) -> None:
+        """A broken progress callback must not take down the whole job."""
+        pipeline = DocumentPipeline(
+            enable_preprocessing=False,
+            enable_layout=False,
+            enable_normalization=False,
+            pipeline_ocr_fn=AsyncMock(return_value="text"),
+        )
+        images = [Image.new("RGB", (50, 50))]
+
+        async def broken_on_page_done(page_num: int, total: int) -> None:
+            error = RuntimeError("webhook down")
+            raise error
+
+        result = await pipeline._process_images(images, on_page_done=broken_on_page_done)
+
+        assert "text" in result
+
+    async def test_checkpointed_page_is_reused_instead_of_reprocessed(self) -> None:
+        """A page found in Redis checkpoints must not be run through OCR again."""
+        ocr_fn = AsyncMock(return_value="fresh text")
+        pipeline = DocumentPipeline(
+            enable_preprocessing=False,
+            enable_layout=False,
+            enable_normalization=False,
+            pipeline_ocr_fn=ocr_fn,
+        )
+        images = [Image.new("RGB", (50, 50)) for _ in range(2)]
+        checkpoints = {
+            1: {"text": "cached page one", "assets": []},
+        }
+
+        with patch(
+            "apps.ocr.pipeline.engine.checkpoint_store.load_pages",
+            AsyncMock(return_value=checkpoints),
+        ):
+            result = await pipeline._process_images(images, task_uid="task-1")
+
+        assert "cached page one" in result
+        assert "fresh text" in result
+        # Only page 2 should have actually gone through OCR.
+        assert ocr_fn.await_count == 1
+
 
 @pytest.mark.unit
 class TestReadingOrder:

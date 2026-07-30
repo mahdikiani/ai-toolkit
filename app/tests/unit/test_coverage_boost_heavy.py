@@ -574,6 +574,7 @@ class TestOcrServiceBranches:
             assert ocr_svc._resolve_ocr_engine(task) == OcrEngineType.pipeline
 
         task = SimpleNamespace(
+            uid="task-1",
             save_report=AsyncMock(),
             result=None,
             task_status=None,

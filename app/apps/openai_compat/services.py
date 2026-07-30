@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi_mongo_base.core.exceptions import BaseHTTPException
+from ufaas.exceptions import InsufficientFundsError
 
 from server.config import Settings
 from utils.billing import finance
@@ -31,6 +32,23 @@ def openai_error(status: int, code: str, message: str) -> BaseHTTPException:
         detail=message,
         message={"en": message},
     )
+
+
+async def _check_quota_or_402(user_id: str, estimated: float) -> None:
+    """
+    Pre-flight quota check that fails as a clean 402, not an unhandled 500.
+
+    ``InsufficientFundsError`` isn't a ``BaseHTTPException``, so letting it
+    propagate straight from ``finance.check_quota`` hits the generic
+    exception handler and returns 500 -- callers (including mirza-bot's
+    ``_apply_user_prompt``, which only catches its own
+    ``InsufficientCreditsError`` type) can't distinguish that from a real
+    server fault.
+    """
+    try:
+        await finance.check_quota(user_id, estimated, raise_exception=True)
+    except InsufficientFundsError as exc:
+        raise openai_error(402, "insufficient_quota", exc.detail) from exc
 
 
 def openai_chat_id() -> str:
@@ -104,7 +122,7 @@ async def handle_non_stream_chat(
 ) -> JSONResponse:
     """Non-streaming completion with quota check + metering."""
     estimated = estimate_chat_cost(body)
-    await finance.check_quota(user_id, estimated, raise_exception=True)
+    await _check_quota_or_402(user_id, estimated)
 
     resp = await post_chat_completion_unchecked(body)
     if resp.status_code >= 400:
@@ -323,7 +341,7 @@ async def handle_stream_chat(
 ) -> StreamingResponse:
     """Streaming completion with quota pre-check and post-stream metering."""
     estimated = estimate_chat_cost(body)
-    await finance.check_quota(user_id, estimated, raise_exception=True)
+    await _check_quota_or_402(user_id, estimated)
     return StreamingResponse(
         _stream_chat_events(body, user_id=user_id, service=service),
         media_type="text/event-stream",

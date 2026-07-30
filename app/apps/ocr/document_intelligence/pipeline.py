@@ -16,6 +16,7 @@ import asyncio
 import logging
 import tempfile
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
@@ -23,8 +24,10 @@ from typing import Literal
 
 from PIL import Image
 
+from apps.ocr import checkpoint_store
+
 from .assets import Asset, AssetManager
-from .ast import DocumentAST, PageAST, build_ast, build_document_ast
+from .ast import ASTNode, DocumentAST, PageAST, build_ast, build_document_ast
 from .elements import ElementProcessor, ProcessedElement
 from .layout import VISUAL_TYPES, LayoutDetector, LayoutElement, LayoutType
 from .loader import Document, Page, load_document
@@ -36,8 +39,106 @@ from .structure.paragraph_merge import merge_paragraphs
 from .structure.table_continuation import merge_table_continuations
 
 DocxMode = Literal["semantic", "visual"]
+ProgressCallback = Callable[[int, int], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
+
+
+def _node_to_dict(node: ASTNode) -> dict:
+    return {
+        "type": node.type.value,
+        "text": node.text,
+        "html": node.html,
+        "latex": node.latex,
+        "caption": node.caption,
+        "description": node.description,
+        "chart_data": node.chart_data,
+        "asset_path": node.asset_path,
+        "children": [_node_to_dict(c) for c in node.children],
+        "page_number": node.page_number,
+        "level": node.level,
+        "rows": node.rows,
+        "cell_merges": [list(m) for m in node.cell_merges],
+        "confidence": node.confidence,
+        "bbox": list(node.bbox),
+        "ordered": node.ordered,
+        "repeat_header_row": node.repeat_header_row,
+    }
+
+
+def _node_from_dict(data: dict) -> ASTNode:
+    return ASTNode(
+        type=LayoutType(data["type"]),
+        text=data.get("text", ""),
+        html=data.get("html", ""),
+        latex=data.get("latex", ""),
+        caption=data.get("caption", ""),
+        description=data.get("description", ""),
+        chart_data=data.get("chart_data"),
+        asset_path=data.get("asset_path", ""),
+        children=[_node_from_dict(c) for c in data.get("children", [])],
+        page_number=data.get("page_number", 1),
+        level=data.get("level", 0),
+        rows=data.get("rows", []),
+        cell_merges=[tuple(m) for m in data.get("cell_merges", [])],
+        confidence=data.get("confidence", 0.0),
+        bbox=tuple(data.get("bbox", (0.0, 0.0, 0.0, 0.0))),
+        ordered=data.get("ordered", False),
+        repeat_header_row=data.get("repeat_header_row", False),
+    )
+
+
+def _page_to_checkpoint(page_ast: PageAST, page_stat: PageStats) -> dict:
+    """
+    Serialize one page's AST + stats for Redis.
+
+    Only text/structure is checkpointed. Visual assets (figures/charts) are
+    written to files under this pipeline instance's own temp output_dir via
+    AssetManager, which doesn't survive a process crash -- a page resumed
+    from checkpoint after a crash keeps its full text but loses any figure
+    it contained. Fixing that would mean checkpointing asset image bytes
+    too, not just page text/structure; left as a known, documented gap.
+    """
+    return {
+        "page_ast": {
+            "page_number": page_ast.page_number,
+            "nodes": [_node_to_dict(n) for n in page_ast.nodes],
+            "page_width": page_ast.page_width,
+            "page_height": page_ast.page_height,
+            "page_dpi": page_ast.page_dpi,
+            "column_count": page_ast.column_count,
+        },
+        "page_stat": {
+            "page_number": page_stat.page_number,
+            "layout_time": page_stat.layout_time,
+            "vlm_time": page_stat.vlm_time,
+            "elements": page_stat.elements,
+            "failed": page_stat.failed,
+            "error": page_stat.error,
+        },
+    }
+
+
+def _page_from_checkpoint(data: dict) -> tuple[PageAST, PageStats]:
+    pa = data["page_ast"]
+    ps = data["page_stat"]
+    page_ast = PageAST(
+        page_number=pa["page_number"],
+        nodes=[_node_from_dict(n) for n in pa["nodes"]],
+        page_width=pa.get("page_width", 0.0),
+        page_height=pa.get("page_height", 0.0),
+        page_dpi=pa.get("page_dpi", 300.0),
+        column_count=pa.get("column_count", 1),
+    )
+    page_stat = PageStats(
+        page_number=ps["page_number"],
+        layout_time=ps["layout_time"],
+        vlm_time=ps["vlm_time"],
+        elements=ps.get("elements", []),
+        failed=ps.get("failed", False),
+        error=ps.get("error"),
+    )
+    return page_ast, page_stat
 
 
 @dataclass
@@ -161,7 +262,12 @@ class DocumentIntelligencePipeline:
         )
 
     async def process(
-        self, file_bytes: BytesIO, filename: str, mode: DocxMode = "semantic"
+        self,
+        file_bytes: BytesIO,
+        filename: str,
+        mode: DocxMode = "semantic",
+        on_page_done: ProgressCallback | None = None,
+        task_uid: str | None = None,
     ) -> PipelineResult:
         """
         Run the full pipeline on a PDF/image and return markdown + docx + assets.
@@ -173,38 +279,72 @@ class DocumentIntelligencePipeline:
         in an absolutely-positioned floating text box; it trades editability
         for closer visual fidelity and is meant for forms/brochures, not as
         the default output.
+
+        ``on_page_done``, if given, is awaited after every page (successful
+        or not) with ``(completed_pages, total_pages)`` -- callers use it to
+        report progress on long documents. A failing callback must not abort
+        the document, so exceptions from it are only logged.
+
+        ``task_uid``, if given, checkpoints each page's AST to Redis as it
+        completes and reuses any checkpoint left by a previous, crashed run
+        of the same task instead of reprocessing that page -- see
+        ``_page_to_checkpoint`` for what is (and isn't) preserved.
         """
         t_start = time.time()
         file_bytes.seek(0)
         file_bytes.name = filename
         document: Document = load_document(file_bytes, dpi=self.dpi)
+        total_pages = len(document.pages)
+        checkpoints = (
+            await checkpoint_store.load_pages(task_uid) if task_uid else {}
+        )
 
         page_asts: list[PageAST] = []
         page_stats: list[PageStats] = []
         for page in document.pages:
-            try:
-                page_ast, page_stat = await self._process_page(page)
-            except Exception:
-                # Each element call already retries transient failures (see
-                # ElementProcessor._call_with_retry); reaching here means
-                # retries were exhausted. A single unlucky page must not
-                # discard every other page's already-completed work in a
-                # potentially hours-long, thousand-call job -- isolate the
-                # failure to this page and keep going.
-                logger.exception(
-                    "Page %d failed after retries; skipping it, continuing document",
-                    page.page_number,
-                )
-                page_ast = PageAST(page_number=page.page_number, nodes=[])
-                page_stat = PageStats(
-                    page_number=page.page_number,
-                    layout_time=0.0,
-                    vlm_time=0.0,
-                    failed=True,
-                    error="processing failed after retries",
-                )
+            cached = checkpoints.get(page.page_number)
+            if cached is not None:
+                page_ast, page_stat = _page_from_checkpoint(cached)
+            else:
+                try:
+                    page_ast, page_stat = await self._process_page(page)
+                except Exception:
+                    # Each element call already retries transient failures (see
+                    # ElementProcessor._call_with_retry); reaching here means
+                    # retries were exhausted. A single unlucky page must not
+                    # discard every other page's already-completed work in a
+                    # potentially hours-long, thousand-call job -- isolate the
+                    # failure to this page and keep going.
+                    logger.exception(
+                        "Page %d failed after retries; skipping it, continuing",
+                        page.page_number,
+                    )
+                    page_ast = PageAST(page_number=page.page_number, nodes=[])
+                    page_stat = PageStats(
+                        page_number=page.page_number,
+                        layout_time=0.0,
+                        vlm_time=0.0,
+                        failed=True,
+                        error="processing failed after retries",
+                    )
+                if task_uid:
+                    await checkpoint_store.save_page(
+                        task_uid,
+                        page.page_number,
+                        _page_to_checkpoint(page_ast, page_stat),
+                    )
             page_asts.append(page_ast)
             page_stats.append(page_stat)
+
+            if on_page_done is not None:
+                try:
+                    await on_page_done(len(page_asts), total_pages)
+                except Exception:
+                    logger.exception(
+                        "Progress callback failed on page %d/%d; continuing",
+                        len(page_asts),
+                        total_pages,
+                    )
 
         asset_map = {a.path: a.rel_path for a in self.asset_manager.get_assets()}
         document_ast = build_document_ast(page_asts, asset_map)

@@ -62,6 +62,34 @@ class TestOpenAICompatServices:
         assert result.status_code == 200
         assert b"chatcmpl-" in result.body
 
+    async def test_handle_non_stream_chat_insufficient_funds_is_a_clean_402(
+        self,
+    ) -> None:
+        """
+        InsufficientFundsError must surface as a real 402, not a 500.
+
+        Regression test: this exception isn't a BaseHTTPException, so
+        letting it propagate straight out of finance.check_quota used to
+        hit the generic exception handler and return 500 -- callers like
+        mirza-bot's CompletionClient specifically check for status 402 to
+        detect this case and can't distinguish it from a real server fault.
+        """
+        from fastapi_mongo_base.core.exceptions import BaseHTTPException
+
+        from utils.billing.finance import _insufficient_funds_error
+
+        with patch(
+            "apps.openai_compat.services.finance.check_quota",
+            new_callable=AsyncMock,
+            side_effect=_insufficient_funds_error("You have only 0 coins"),
+        ), pytest.raises(BaseHTTPException) as exc_info:
+            await openai_services.handle_non_stream_chat(
+                {"model": "m", "messages": [{"role": "user", "content": "x"}]},
+                user_id="u1",
+                model="m",
+            )
+        assert exc_info.value.status_code == 402
+
     async def test_list_models_requires_auth(self, client: httpx.AsyncClient) -> None:
         response = await client.get("/openai/v1/models")
         assert response.status_code in (401, 403)

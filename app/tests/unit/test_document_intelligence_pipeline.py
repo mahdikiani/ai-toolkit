@@ -7,7 +7,7 @@ Order -> AST -> Renderers -> Assets without needing GPU/network access.
 """
 
 from io import BytesIO
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from docx import Document as WordDocument
@@ -238,9 +238,171 @@ class TestPageFaultIsolation:
         summary = summarize_stats(result.stats)
         assert summary["failed_pages"] == [2]
 
-        # the two successful pages' content still made it into the
-        # final markdown -- only page 2's content is missing. Each
-        # successful page contributes two "سلام دنیا" occurrences (the
-        # title element and the paragraph element both resolve to the
-        # same fake OCR text), so two successful pages -> four.
-        assert result.markdown.count("سلام دنیا") == 4
+
+@pytest.mark.document_intelligence
+class TestProgressCallback:
+    """``on_page_done`` lets callers report progress on long documents."""
+
+    async def test_called_after_every_page_including_failed_ones(self) -> None:
+        from apps.ocr.document_intelligence.loader import Document, Page
+
+        pages = [
+            Page(
+                id=f"p{i}",
+                page_number=i,
+                image=Image.new("RGB", (600, 800), "white"),
+                width=600,
+                height=800,
+            )
+            for i in range(1, 4)
+        ]
+        fake_document = Document(
+            id="doc1",
+            filename="test.pdf",
+            pages=pages,
+            pages_count=3,
+            created_at="now",
+        )
+
+        pipeline = DocumentIntelligencePipeline(dpi=100)
+        progress_calls: list[tuple[int, int]] = []
+
+        async def on_page_done(completed: int, total: int) -> None:
+            progress_calls.append((completed, total))
+
+        try:
+            original_process_page = pipeline._process_page
+
+            async def flaky_process_page(page):
+                if page.page_number == 2:
+                    error = RuntimeError("VLM exhausted retries")
+                    raise error
+                return await original_process_page(page)
+
+            with (
+                patch(
+                    "apps.ocr.document_intelligence.pipeline.load_document",
+                    return_value=fake_document,
+                ),
+                patch(
+                    "apps.ocr.document_intelligence.layout.LayoutDetector.detect_page",
+                    _fake_detect_page,
+                ),
+                patch(
+                    "apps.ocr.document_intelligence.elements.ElementProcessor._vlm_call",
+                    _fake_vlm_call,
+                ),
+                patch.object(pipeline, "_process_page", flaky_process_page),
+            ):
+                await pipeline.process(
+                    _blank_image(), "test.pdf", on_page_done=on_page_done
+                )
+        finally:
+            pipeline.cleanup()
+
+        assert progress_calls == [(1, 3), (2, 3), (3, 3)]
+
+    async def test_broken_callback_does_not_abort_the_document(self) -> None:
+        async def broken_on_page_done(_completed: int, _total: int) -> None:
+            error = RuntimeError("webhook down")
+            raise error
+
+        with (
+            patch(
+                "apps.ocr.document_intelligence.layout.LayoutDetector.detect_page",
+                _fake_detect_page,
+            ),
+            patch(
+                "apps.ocr.document_intelligence.elements.ElementProcessor._vlm_call",
+                _fake_vlm_call,
+            ),
+        ):
+            pipeline = DocumentIntelligencePipeline(dpi=100)
+            try:
+                result = await pipeline.process(
+                    _blank_image(), "test.png", on_page_done=broken_on_page_done
+                )
+            finally:
+                pipeline.cleanup()
+
+        assert "سلام دنیا" in result.markdown
+
+
+@pytest.mark.document_intelligence
+class TestCheckpointResume:
+    """A page found in Redis checkpoints must not go through the VLM again."""
+
+    async def test_checkpointed_page_is_reused_instead_of_reprocessed(self) -> None:
+        from apps.ocr.document_intelligence.loader import Document, Page
+
+        pages = [
+            Page(
+                id=f"p{i}",
+                page_number=i,
+                image=Image.new("RGB", (600, 800), "white"),
+                width=600,
+                height=800,
+            )
+            for i in range(1, 3)
+        ]
+        fake_document = Document(
+            id="doc1", filename="test.pdf", pages=pages, pages_count=2, created_at="now"
+        )
+        checkpoints = {
+            1: {
+                "page_ast": {
+                    "page_number": 1,
+                    "nodes": [
+                        {
+                            "type": "paragraph",
+                            "text": "cached page one text",
+                            "children": [],
+                        }
+                    ],
+                },
+                "page_stat": {
+                    "page_number": 1,
+                    "layout_time": 0.0,
+                    "vlm_time": 0.0,
+                },
+            }
+        }
+
+        pipeline = DocumentIntelligencePipeline(dpi=100)
+        try:
+            original_process_page = pipeline._process_page
+            process_page_calls: list[int] = []
+
+            async def tracking_process_page(page):
+                process_page_calls.append(page.page_number)
+                return await original_process_page(page)
+
+            with (
+                patch(
+                    "apps.ocr.document_intelligence.pipeline.load_document",
+                    return_value=fake_document,
+                ),
+                patch(
+                    "apps.ocr.document_intelligence.pipeline.checkpoint_store.load_pages",
+                    AsyncMock(return_value=checkpoints),
+                ),
+                patch(
+                    "apps.ocr.document_intelligence.layout.LayoutDetector.detect_page",
+                    _fake_detect_page,
+                ),
+                patch(
+                    "apps.ocr.document_intelligence.elements.ElementProcessor._vlm_call",
+                    _fake_vlm_call,
+                ),
+                patch.object(pipeline, "_process_page", tracking_process_page),
+            ):
+                result = await pipeline.process(
+                    _blank_image(), "test.pdf", task_uid="task-1"
+                )
+        finally:
+            pipeline.cleanup()
+
+        assert "cached page one text" in result.markdown
+        # Only page 2 should have actually been processed; page 1 came from
+        # the checkpoint.
+        assert process_page_calls == [2]

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from io import BytesIO
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from utils.billing import finance
 from utils.billing.saas import UsageSchema
 from utils.files import mime
 
+from . import checkpoint_store
 from .archive_services import process_compressed_archive
 from .file_processors import (
     is_compressed_file,
@@ -70,6 +72,34 @@ _EXTENSION_BY_MIME = {
     "image/tiff": ".tiff",
     "image/webp": ".webp",
 }
+
+_PROGRESS_REPORT_EVERY_PAGES = 10
+
+
+def _make_progress_reporter(task: OcrTask) -> Callable[[int, int], Awaitable[None]]:
+    """
+    Build a per-page progress callback for a long-running OCR task.
+
+    Reports every ``_PROGRESS_REPORT_EVERY_PAGES`` pages (and on the last
+    page) via ``task.update_and_emit``, which persists progress and fires
+    the task's webhook without touching ``task_status`` -- the caller (e.g.
+    mirza-bot) can then edit its "processing..." message to show progress.
+    A failure to report must never abort the document.
+    """
+
+    async def _report(completed: int, total: int) -> None:
+        if completed % _PROGRESS_REPORT_EVERY_PAGES != 0 and completed != total:
+            return
+        progress = int(completed / total * 100) if total else 0
+        try:
+            await task.update_and_emit(
+                task_progress=progress,
+                task_report=f"{completed}/{total} pages processed",
+            )
+        except Exception:
+            logger.exception("Failed to report OCR progress for task %s", task.uid)
+
+    return _report
 
 
 async def process_ocr(task: OcrTask) -> OcrTask:
@@ -150,6 +180,37 @@ async def process_ocr(task: OcrTask) -> OcrTask:
     except Exception as exc:
         logging.exception("Error processing task %s", task.uid)
         return await save_error(task, f"OCR processing failed: {exc}")
+
+
+_background_tasks: set[asyncio.Task] = set()
+
+
+async def resume_stuck_ocr_tasks() -> None:
+    """
+    Resume OCR tasks left mid-flight by a previous crash.
+
+    Called once at process startup (see server/server.py's init_functions,
+    run after Mongo/Redis are ready). OCR runs as an in-process background
+    task, not a separate worker -- a task still marked "processing" when a
+    fresh process starts up was never marked completed/error by whatever
+    process handled it before, which only happens if that process died
+    mid-job. Reprocessing it picks up from whatever pages were checkpointed
+    to Redis instead of starting the document over.
+
+    Assumes a single ai-toolkit instance. Running multiple replicas would
+    need per-instance task ownership to avoid two processes resuming (and
+    double-billing) the same task concurrently.
+    """
+    stuck_tasks = await OcrTask.find(
+        {"task_status": TaskStatusEnum.processing.value}
+    ).to_list()
+    for task in stuck_tasks:
+        logger.warning(
+            "Resuming OCR task %s stuck in 'processing' after restart", task.uid
+        )
+        bg_task = asyncio.create_task(process_ocr(task))
+        _background_tasks.add(bg_task)
+        bg_task.add_done_callback(_background_tasks.discard)
 
 
 async def _upload_pipeline_assets_and_docx(
@@ -237,10 +298,15 @@ async def _process_with_pipeline(
         pipeline_ocr_fn=ocr_fn,
     )
 
+    on_page_done = _make_progress_reporter(task)
     if file_type == "application/pdf":
-        result = await pipeline.process_pdf(file_content)
+        result = await pipeline.process_pdf(
+            file_content, on_page_done=on_page_done, task_uid=task.uid
+        )
     else:
-        result = await pipeline.process_image_bytes(file_content)
+        result = await pipeline.process_image_bytes(
+            file_content, on_page_done=on_page_done, task_uid=task.uid
+        )
 
     result, docx_url = await _upload_pipeline_assets_and_docx(
         pipeline, result, file_content, file_type
@@ -305,7 +371,12 @@ async def _process_with_document_intelligence(
     filename = f"document{_EXTENSION_BY_MIME.get(file_type, '')}"
     di_pipeline = DocumentIntelligencePipeline()
     try:
-        result = await di_pipeline.process(file_content, filename)
+        result = await di_pipeline.process(
+            file_content,
+            filename,
+            on_page_done=_make_progress_reporter(task),
+            task_uid=task.uid,
+        )
     except Exception as exc:
         di_pipeline.cleanup()
         shutil.rmtree(di_pipeline.output_dir, ignore_errors=True)
@@ -370,6 +441,7 @@ async def save_error(task: OcrTask, message: str) -> OcrTask:
     """Save error result for a task."""
     task.task_status = TaskStatusEnum.error
     await task.save_report(message)
+    await checkpoint_store.clear(task.uid)
     return task
 
 
@@ -387,4 +459,5 @@ async def save_result(
     task.usage_id = usage_id
     task.provider_meta = provider_meta
     await task.save_report("Task processed successfully")
+    await checkpoint_store.clear(task.uid)
     return task

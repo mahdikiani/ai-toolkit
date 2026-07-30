@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
+from apps.ocr import services as services_mod
 from apps.ocr.file_processors import (
     can_process_directly,
     is_compressed_file,
@@ -533,3 +534,57 @@ class TestOcrQuotaAndErrorHandling:
         task.save_report.assert_called_once_with(
             "OCR processing failed: Unexpected error"
         )
+
+
+@pytest.mark.unit
+class TestResumeStuckOcrTasks:
+    """
+    Startup crash-recovery reconciler.
+
+    A task still "processing" when the process starts up was never marked
+    completed/error by whatever process handled it before -- since OCR
+    runs as an in-process background task, that only happens if the
+    previous process died mid-job.
+    """
+
+    async def test_reprocesses_every_task_still_marked_processing(self) -> None:
+        from apps.ocr.services import resume_stuck_ocr_tasks
+
+        stuck_a, stuck_b = MagicMock(uid="a"), MagicMock(uid="b")
+        find_result = MagicMock()
+        find_result.to_list = AsyncMock(return_value=[stuck_a, stuck_b])
+
+        with (
+            patch(
+                "apps.ocr.services.OcrTask.find", return_value=find_result
+            ) as mock_find,
+            patch(
+                "apps.ocr.services.process_ocr", new_callable=AsyncMock
+            ) as mock_process,
+        ):
+            await resume_stuck_ocr_tasks()
+            # Let the fire-and-forget asyncio.create_task callbacks run.
+            for task in list(services_mod._background_tasks):
+                await task
+
+        mock_find.assert_called_once_with({"task_status": TaskStatusEnum.processing.value})
+        assert mock_process.await_args_list == [
+            ((stuck_a,),),
+            ((stuck_b,),),
+        ]
+
+    async def test_no_stuck_tasks_schedules_nothing(self) -> None:
+        from apps.ocr.services import resume_stuck_ocr_tasks
+
+        find_result = MagicMock()
+        find_result.to_list = AsyncMock(return_value=[])
+
+        with (
+            patch("apps.ocr.services.OcrTask.find", return_value=find_result),
+            patch(
+                "apps.ocr.services.process_ocr", new_callable=AsyncMock
+            ) as mock_process,
+        ):
+            await resume_stuck_ocr_tasks()
+
+        mock_process.assert_not_called()

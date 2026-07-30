@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import logging
+from collections.abc import Awaitable, Callable
 from io import BytesIO
 from typing import Any
 
 from PIL import Image
+
+from apps.ocr import checkpoint_store
 
 from . import preprocessing
 from .layout_detector import ElementType, LayoutBox, LayoutDetector
@@ -31,6 +35,25 @@ TEXT_TYPES = {
 VISUAL_TYPES = {ElementType.figure, ElementType.chart}
 SPECIAL_TYPES = {ElementType.table, ElementType.formula}
 SKIP_TYPES = {ElementType.header, ElementType.footer, ElementType.page_number}
+
+ProgressCallback = Callable[[int, int], Awaitable[None]]
+
+
+def _assets_to_checkpoint(assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Base64-encode asset image bytes so a page's result is JSON-safe for Redis."""
+    return [
+        {**{k: v for k, v in asset.items() if k != "image_bytes"},
+         "image_b64": base64.b64encode(asset["image_bytes"]).decode("ascii")}
+        for asset in assets
+    ]
+
+
+def _assets_from_checkpoint(checkpointed: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {**{k: v for k, v in asset.items() if k != "image_b64"},
+         "image_bytes": base64.b64decode(asset["image_b64"])}
+        for asset in checkpointed
+    ]
 
 
 class DocumentPipeline:
@@ -98,7 +121,12 @@ class DocumentPipeline:
         """Perform get all crops."""
         return dict(self._crops)
 
-    async def process_pdf(self, pdf_bytes: BytesIO) -> str:
+    async def process_pdf(
+        self,
+        pdf_bytes: BytesIO,
+        on_page_done: ProgressCallback | None = None,
+        task_uid: str | None = None,
+    ) -> str:
         """Perform process pdf."""
         pages = render_pdf_bytes(pdf_bytes, dpi=self.dpi)
         self.assets.clear()
@@ -106,26 +134,88 @@ class DocumentPipeline:
         self._page_footers.clear()
         self._all_elements.clear()
         self._crops.clear()
-        return await self._process_images(pages)
+        return await self._process_images(
+            pages, on_page_done=on_page_done, task_uid=task_uid
+        )
 
-    async def process_image(self, image: Image.Image) -> str:
+    async def process_image(
+        self,
+        image: Image.Image,
+        on_page_done: ProgressCallback | None = None,
+        task_uid: str | None = None,
+    ) -> str:
         """Perform process image."""
         self.assets.clear()
         self._page_headers.clear()
         self._page_footers.clear()
         self._all_elements.clear()
         self._crops.clear()
-        return await self._process_images([image])
+        return await self._process_images(
+            [image], on_page_done=on_page_done, task_uid=task_uid
+        )
 
-    async def process_image_bytes(self, image_bytes: BytesIO) -> str:
+    async def process_image_bytes(
+        self,
+        image_bytes: BytesIO,
+        on_page_done: ProgressCallback | None = None,
+        task_uid: str | None = None,
+    ) -> str:
         """Perform process image bytes."""
         image = Image.open(image_bytes)
-        return await self.process_image(image)
+        return await self.process_image(
+            image, on_page_done=on_page_done, task_uid=task_uid
+        )
 
-    async def _process_images(self, images: list[Image.Image]) -> str:
+    async def _process_images(
+        self,
+        images: list[Image.Image],
+        on_page_done: ProgressCallback | None = None,
+        task_uid: str | None = None,
+    ) -> str:
+        """
+        Process every page, checkpointing each one to Redis when ``task_uid`` is given.
+
+        A page already checkpointed (from a previous run of this same task
+        that crashed mid-document) is reused instead of reprocessed --
+        that's what makes a restart resume instead of starting over. Only
+        the page's text and inline visual assets are checkpointed; per-page
+        layout/crops used for DOCX header/footer reconstruction are not, so
+        a resumed page's contribution to the DOCX (not the plain text
+        result) may be less complete than a page processed in one run.
+        """
+        checkpoints = (
+            await checkpoint_store.load_pages(task_uid) if task_uid else {}
+        )
+
         all_text: list[str] = []
+        total = len(images)
         for page_num, image in enumerate(images, 1):
-            page_text, page_assets = await self._process_page(image, page_num)
+            cached = checkpoints.get(page_num)
+            if cached is not None:
+                page_text = cached["text"]
+                page_assets = _assets_from_checkpoint(cached["assets"])
+            else:
+                try:
+                    page_text, page_assets = await self._process_page(image, page_num)
+                except Exception:
+                    # A single page's unexpected failure (bad crop, corrupt
+                    # image data, etc.) must not discard every other page's
+                    # already-completed work in a potentially hours-long,
+                    # thousand-page job -- isolate it and keep going.
+                    logger.exception(
+                        "Page %d failed unexpectedly; skipping it, continuing document",
+                        page_num,
+                    )
+                    page_text, page_assets = "", []
+                if task_uid:
+                    await checkpoint_store.save_page(
+                        task_uid,
+                        page_num,
+                        {
+                            "text": page_text,
+                            "assets": _assets_to_checkpoint(page_assets),
+                        },
+                    )
             self.assets.extend(page_assets)
             if page_text:
                 all_text.append(page_text)
@@ -134,6 +224,16 @@ class DocumentPipeline:
                 all_text.append(
                     f"\n> *[صفحه {page_num} — محتوای این صفحه قابل استخراج نبود]*\n"
                 )
+
+            if on_page_done is not None:
+                try:
+                    await on_page_done(page_num, total)
+                except Exception:
+                    logger.exception(
+                        "Progress callback failed on page %d/%d; continuing",
+                        page_num,
+                        total,
+                    )
         return "\n\n---\n\n".join(all_text)
 
     def _layout_elements(

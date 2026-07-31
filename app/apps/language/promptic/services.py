@@ -318,7 +318,10 @@ async def invoke_stream(task: "PrompticTask") -> AsyncIterator[str]:
         # reachable for free by a caller passing stream=true.
         estimated = _estimate_preflight_cost(model_cfg, task.input_variables)
         quota = await finance.check_quota(
-            task.user_id, estimated, raise_exception=False
+            task.user_id,
+            estimated,
+            raise_exception=False,
+            workspace_id=task.workspace_id,
         )
         if quota < estimated:
             task.error = "insufficient_quota"
@@ -358,6 +361,7 @@ async def invoke_stream(task: "PrompticTask") -> AsyncIterator[str]:
                     "prompt": task.prompt_name,
                     "provider_meta": {"model": model, "usage": last_usage},
                 },
+                workspace_id=task.workspace_id,
             )
         except Exception:
             logger.exception(
@@ -405,7 +409,10 @@ async def process_promptic(
         # can't afford and then failing to bill it.
         estimated = _estimate_preflight_cost(model_cfg, task.input_variables)
         quota = await finance.check_quota(
-            task.user_id, estimated, raise_exception=False
+            task.user_id,
+            estimated,
+            raise_exception=False,
+            workspace_id=task.workspace_id,
         )
         if quota < estimated:
             await task.update_and_emit(
@@ -462,6 +469,7 @@ async def process_promptic(
                     "prompt": task.prompt_name,
                     "provider_meta": provider_meta,
                 },
+                workspace_id=task.workspace_id,
             )
         except Exception:
             logger.exception(

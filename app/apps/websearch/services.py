@@ -22,7 +22,9 @@ def _estimate_search_cost(task: WebSearchTask) -> float:
 async def process_search(task: WebSearchTask) -> WebSearchTask:
     """Run a web search and record its (fixed, per-search) usage cost."""
     estimated = _estimate_search_cost(task)
-    quota = await finance.check_quota(task.user_id, estimated, raise_exception=False)
+    quota = await finance.check_quota(
+        task.user_id, estimated, raise_exception=False, workspace_id=task.workspace_id
+    )
     if quota < estimated:
         task.task_status = TaskStatusEnum.error
         await task.save_report("insufficient_quota")
@@ -51,6 +53,7 @@ async def process_search(task: WebSearchTask) -> WebSearchTask:
                 "provider": "exa",
                 "query": task.query[:200],
             },
+            workspace_id=task.workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter web search usage")

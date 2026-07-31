@@ -67,7 +67,12 @@ async def process_compressed_archive(
 
     results = await archive_utils.run_directory_files(temp_dir, get_pages)
     total_pages = sum(pages for pages in results if pages)
-    quota = await finance.check_quota(task.user_id, total_pages, raise_exception=False)
+    quota = await finance.check_quota(
+        task.user_id,
+        total_pages,
+        raise_exception=False,
+        workspace_id=task.workspace_id,
+    )
     if quota < total_pages:
         return await save_error(task, "Insufficient quota")
 
@@ -86,7 +91,10 @@ async def process_compressed_archive(
     usage = None
     try:
         usage = await finance.meter_cost(
-            task.user_id, amount, meta_data={"service": "ocr", "pages": total_pages}
+            task.user_id,
+            amount,
+            meta_data={"service": "ocr", "pages": total_pages},
+            workspace_id=task.workspace_id,
         )
     except Exception:
         logging.exception("Failed to meter archive OCR usage for task %s", task.uid)

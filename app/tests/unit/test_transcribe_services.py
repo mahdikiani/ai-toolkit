@@ -388,6 +388,7 @@ class TestTranscriptionQuotaAndMetering:
             task.user_id,
             task.audio_duration / 60,
             raise_exception=False,
+            workspace_id=task.workspace_id,
         )
 
     async def test_meters_usage_after_chunked_transcription(self) -> None:
@@ -466,6 +467,7 @@ class TestTranscriptionQuotaAndMetering:
             task.user_id,
             10.0,
             meta_data={"service": "transcribe", "provider": "soniox", "chunks": 2},
+            workspace_id=task.workspace_id,
         )
 
     async def test_meters_usage_after_webhook_processing(self) -> None:

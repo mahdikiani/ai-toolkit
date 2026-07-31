@@ -25,7 +25,9 @@ async def process_youtube(task: YoutubeTranscriptTask) -> YoutubeTranscriptTask:
         return task
 
     amount = finance.estimate_youtube_cost()
-    quota = await finance.check_quota(task.user_id, amount, raise_exception=False)
+    quota = await finance.check_quota(
+        task.user_id, amount, raise_exception=False, workspace_id=task.workspace_id
+    )
     if quota < amount:
         await task.update_and_emit(
             task_status=TaskStatusEnum.error,
@@ -94,6 +96,7 @@ async def process_youtube(task: YoutubeTranscriptTask) -> YoutubeTranscriptTask:
                 "provider": "youtube-transcript.io",
                 "video_id": task.video_id,
             },
+            workspace_id=task.workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter youtube usage for task %s", task.uid)

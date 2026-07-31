@@ -66,6 +66,7 @@ class UsageCreateSchema(BaseModel):
     """Schema for creating a new usage record."""
 
     user_id: str | None = None
+    workspace_id: str | None = None
     enrollment_id: str | None = None
     asset: str
     amount: Decimal = Decimal(1)
@@ -118,6 +119,7 @@ class UsageSchema(TenantUserEntitySchema):
     asset: str
     amount: Decimal
     variant: str | None = None
+    workspace_id: str | None = None
 
     @classmethod
     def search_exclude_set(cls) -> list[str]:
@@ -148,6 +150,7 @@ class QuotaSchema(BaseModel):
     """Schema representing a user's quota information."""
 
     user_id: str | None = None
+    workspace_id: str | None = None
     asset: str
     quota: Decimal
     unit: str | None = None

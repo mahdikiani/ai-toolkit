@@ -66,6 +66,7 @@ class YoutubeRouter(AbstractTaskUSSORouter):
             **data.model_dump(exclude_none=True),
             "tenant_id": user.tenant_id,
             "user_id": data.user_id or user.uid,
+            "workspace_id": user.workspace_id,
         })
         background_tasks.add_task(item.start_processing)
         return item

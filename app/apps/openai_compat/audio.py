@@ -55,7 +55,9 @@ async def _poll_transcription(job_id: str) -> object:
     raise openai_error(504, "timeout", "Transcription timed out")
 
 
-async def create_speech(body: dict, *, user_id: str) -> Response:
+async def create_speech(
+    body: dict, *, user_id: str, workspace_id: str | None = None
+) -> Response:
     """Proxy OpenAI-style TTS to OpenRouter `/audio/speech`."""
     text = body.get("input") or body.get("text")
     if not text or not isinstance(text, str):
@@ -68,7 +70,7 @@ async def create_speech(body: dict, *, user_id: str) -> Response:
     response_format = body.get("response_format", "mp3")
 
     estimated = _estimate_speech_cost(text)
-    await finance.check_quota_or_error(user_id, estimated)
+    await finance.check_quota_or_error(user_id, estimated, workspace_id=workspace_id)
 
     try:
         resolve_api_key()
@@ -97,6 +99,7 @@ async def create_speech(body: dict, *, user_id: str) -> Response:
                 "model": model,
                 "chars": len(text),
             },
+            workspace_id=workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter openai_compat speech usage")
@@ -120,6 +123,7 @@ async def create_transcription(
     model: str | None = None,
     language: str | None = None,
     response_format: str = "json",
+    workspace_id: str | None = None,
 ) -> dict:
     """Transcribe uploaded audio via Soniox and return OpenAI-shaped JSON."""
     if not content:
@@ -130,7 +134,7 @@ async def create_transcription(
         )
 
     estimated = finance.estimate_transcribe_cost(minutes=1.0, provider="soniox")
-    await finance.check_quota_or_error(user_id, estimated)
+    await finance.check_quota_or_error(user_id, estimated, workspace_id=workspace_id)
 
     suffix = Path(filename).suffix or ".wav"
     with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
@@ -164,6 +168,7 @@ async def create_transcription(
                     "model": model or "soniox",
                     "minutes": minutes,
                 },
+                workspace_id=workspace_id,
             )
         except Exception:
             logger.exception("Failed to meter openai_compat transcription usage")

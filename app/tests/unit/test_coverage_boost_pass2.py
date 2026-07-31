@@ -138,6 +138,7 @@ class TestOcrServicesCoverage:
         task = SimpleNamespace(
             uid="t",
             user_id="u",
+            workspace_id=None,
             save_report=AsyncMock(),
             result=None,
             task_status=None,
@@ -491,7 +492,7 @@ class TestChatRoutesCoverage:
         from apps.language.chat.routes import ChatSessionRouter
 
         router = ChatSessionRouter.__new__(ChatSessionRouter)
-        user = SimpleNamespace(uid="u1", user_id="u1")
+        user = SimpleNamespace(uid="u1", user_id="u1", workspace_id=None)
         request = MagicMock()
         session = SimpleNamespace(
             uid="s1",

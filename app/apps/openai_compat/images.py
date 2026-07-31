@@ -27,7 +27,9 @@ def _estimate_image_cost(body: dict) -> float:
     return n * per_image * markup
 
 
-async def create_generation(body: dict, *, user_id: str) -> JSONResponse:
+async def create_generation(
+    body: dict, *, user_id: str, workspace_id: str | None = None
+) -> JSONResponse:
     """Generate images via OpenRouter's images/generations endpoint."""
     prompt = body.get("prompt")
     if not prompt or not isinstance(prompt, str):
@@ -40,7 +42,7 @@ async def create_generation(body: dict, *, user_id: str) -> JSONResponse:
     response_format = body.get("response_format", "url")
 
     estimated = _estimate_image_cost(body)
-    await finance.check_quota_or_error(user_id, estimated)
+    await finance.check_quota_or_error(user_id, estimated, workspace_id=workspace_id)
 
     try:
         resolve_api_key()
@@ -73,6 +75,7 @@ async def create_generation(body: dict, *, user_id: str) -> JSONResponse:
                 "model": model,
                 "n": n,
             },
+            workspace_id=workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter image generation usage")
@@ -86,6 +89,7 @@ async def create_edit(
     user_id: str,
     image_bytes: bytes | None = None,
     mask_bytes: bytes | None = None,
+    workspace_id: str | None = None,
 ) -> JSONResponse:
     """Edit an image via OpenRouter's images/edits endpoint."""
     prompt = body.get("prompt")
@@ -98,7 +102,7 @@ async def create_edit(
     response_format = body.get("response_format", "url")
 
     estimated = _estimate_image_cost(body)
-    await finance.check_quota_or_error(user_id, estimated)
+    await finance.check_quota_or_error(user_id, estimated, workspace_id=workspace_id)
 
     try:
         resolve_api_key()
@@ -138,6 +142,7 @@ async def create_edit(
                 "model": model,
                 "n": n,
             },
+            workspace_id=workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter image edit usage")

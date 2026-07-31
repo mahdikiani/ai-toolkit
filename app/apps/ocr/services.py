@@ -41,7 +41,12 @@ async def _meter_usage(
     otherwise-successful task as failed.
     """
     try:
-        return await finance.meter_cost(task.user_id, amount, meta_data=meta_data)
+        return await finance.meter_cost(
+            task.user_id,
+            amount,
+            meta_data=meta_data,
+            workspace_id=task.workspace_id,
+        )
     except Exception:
         logger.exception("Failed to meter OCR usage for task %s", task.uid)
         return None
@@ -142,7 +147,10 @@ async def process_ocr(task: OcrTask) -> OcrTask:
 
         # Check quota
         quota = await finance.check_quota(
-            task.user_id, len(pages), raise_exception=False
+            task.user_id,
+            len(pages),
+            raise_exception=False,
+            workspace_id=task.workspace_id,
         )
         if quota < len(pages):
             logging.error("Insufficient quota for task %s", task.uid)
@@ -286,7 +294,12 @@ async def _process_with_pipeline(
     page_count = count_pdf_bytes(file_content) if file_type == "application/pdf" else 1
     if page_count < 1:
         return await save_error(task, "Document has no pages")
-    quota = await finance.check_quota(task.user_id, page_count, raise_exception=False)
+    quota = await finance.check_quota(
+        task.user_id,
+        page_count,
+        raise_exception=False,
+        workspace_id=task.workspace_id,
+    )
     if quota < page_count:
         return await save_error(task, "insufficient_quota")
 
@@ -364,7 +377,12 @@ async def _process_with_document_intelligence(
     page_count = count_pdf_bytes(file_content) if file_type == "application/pdf" else 1
     if page_count < 1:
         return await save_error(task, "Document has no pages")
-    quota = await finance.check_quota(task.user_id, page_count, raise_exception=False)
+    quota = await finance.check_quota(
+        task.user_id,
+        page_count,
+        raise_exception=False,
+        workspace_id=task.workspace_id,
+    )
     if quota < page_count:
         return await save_error(task, "insufficient_quota")
 

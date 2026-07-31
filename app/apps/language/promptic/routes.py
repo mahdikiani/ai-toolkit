@@ -84,6 +84,7 @@ class PrompticRouter(AbstractTaskUSSORouter):
             "prompt_name": prompt_name,
             "user_id": data.user_id or user.uid,
             "tenant_id": user.tenant_id,
+            "workspace_id": user.workspace_id,
         })
 
         item.task_status = TaskStatusEnum.processing

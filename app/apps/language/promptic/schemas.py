@@ -6,6 +6,8 @@ from fastapi_mongo_base.schemas import TenantUserEntitySchema
 from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import Field
 
+from utils.workspace import WorkspaceScopedSchema
+
 
 class PrompticCreate(TaskCreateFieldsMixin):
     """Schema for creating a promptic run."""
@@ -20,7 +22,9 @@ class PrompticCreate(TaskCreateFieldsMixin):
     )
 
 
-class PrompticSchema(TenantUserEntitySchema, TaskMixin, PrompticCreate):
+class PrompticSchema(
+    TenantUserEntitySchema, TaskMixin, WorkspaceScopedSchema, PrompticCreate
+):
     """Complete promptic schema with lifecycle tracking."""
 
     prompt_name: str = Field(..., description="Name of the prompt template")

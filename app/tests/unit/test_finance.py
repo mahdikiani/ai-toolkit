@@ -54,6 +54,66 @@ class TestGetQuota:
 
         assert result == Decimal("500.00")
 
+    async def test_forwards_workspace_id_when_provided(self) -> None:
+        """get_quota should pass workspace_id through as a query param."""
+        from utils.billing.finance import get_quota
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"quota": "500.00"}
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        with (
+            patch("utils.billing.finance.Settings") as mock_settings,
+            patch("utils.billing.finance.get_ufaas_client") as mock_get_client,
+            patch("utils.billing.finance.QuotaSchema") as mock_schema,
+        ):
+            mock_settings.finance_api_key = "test_key"
+            mock_get_client.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_get_client.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_schema.model_validate.return_value = MagicMock(
+                quota=Decimal("500.00")
+            )
+
+            await get_quota("user_123", workspace_id="workspace_1")
+
+        assert mock_client.get.call_args.kwargs["params"]["workspace_id"] == (
+            "workspace_1"
+        )
+
+    async def test_omits_workspace_id_when_not_provided(self) -> None:
+        """get_quota should not send workspace_id when it's absent."""
+        from utils.billing.finance import get_quota
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"quota": "500.00"}
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        with (
+            patch("utils.billing.finance.Settings") as mock_settings,
+            patch("utils.billing.finance.get_ufaas_client") as mock_get_client,
+            patch("utils.billing.finance.QuotaSchema") as mock_schema,
+        ):
+            mock_settings.finance_api_key = "test_key"
+            mock_get_client.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_get_client.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_schema.model_validate.return_value = MagicMock(
+                quota=Decimal("500.00")
+            )
+
+            await get_quota("user_123")
+
+        assert "workspace_id" not in mock_client.get.call_args.kwargs["params"]
+
 
 @pytest.mark.unit
 class TestCheckQuota:
@@ -103,6 +163,63 @@ class TestCheckQuota:
 
         assert result == Decimal("5")
 
+    async def test_forwards_workspace_id_to_get_quota(self) -> None:
+        """check_quota should forward workspace_id to get_quota."""
+        from utils.billing.finance import check_quota
+
+        with patch(
+            "utils.billing.finance.get_quota",
+            new_callable=AsyncMock,
+            return_value=Decimal("100"),
+        ) as mock_get_quota:
+            await check_quota("user_123", 10.0, workspace_id="workspace_1")
+
+        mock_get_quota.assert_awaited_once_with("user_123", workspace_id="workspace_1")
+
+
+@pytest.mark.unit
+class TestCheckQuotaOrError:
+    """Tests for check_quota_or_error function."""
+
+    async def test_forwards_workspace_id_to_check_quota(self) -> None:
+        """check_quota_or_error should forward workspace_id to check_quota."""
+        from utils.billing.finance import check_quota_or_error
+
+        with patch(
+            "utils.billing.finance.check_quota",
+            new_callable=AsyncMock,
+            return_value=Decimal("100"),
+        ) as mock_check_quota:
+            result = await check_quota_or_error(
+                "user_123", 10.0, workspace_id="workspace_1"
+            )
+
+        assert result == Decimal("100")
+        mock_check_quota.assert_awaited_once_with(
+            "user_123", 10.0, raise_exception=True, workspace_id="workspace_1"
+        )
+
+    async def test_raises_clean_402_on_insufficient_funds(self) -> None:
+        """check_quota_or_error should convert InsufficientFundsError to a 402."""
+        from fastapi_mongo_base.core.exceptions import BaseHTTPException
+
+        from utils.billing.finance import (
+            _insufficient_funds_error,
+            check_quota_or_error,
+        )
+
+        with (
+            patch(
+                "utils.billing.finance.check_quota",
+                new_callable=AsyncMock,
+                side_effect=_insufficient_funds_error("not enough"),
+            ),
+            pytest.raises(BaseHTTPException) as exc_info,
+        ):
+            await check_quota_or_error("user_123", 10.0)
+
+        assert exc_info.value.status_code == 402
+
 
 @pytest.mark.unit
 class TestMeterCost:
@@ -149,6 +266,34 @@ class TestMeterCost:
             result = await meter_cost("user_123", 5.0)
 
         assert result == mock_usage
+
+    async def test_forwards_workspace_id_in_usage_schema(self) -> None:
+        """meter_cost should stamp workspace_id onto the created usage record."""
+        from utils.billing.finance import meter_cost
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"uid": "usage_123", "amount": "5.0"}
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with (
+            patch("utils.billing.finance.Settings") as mock_settings,
+            patch("utils.billing.finance.get_ufaas_client") as mock_get_client,
+            patch("utils.billing.finance.UsageSchema") as mock_schema,
+        ):
+            mock_settings.finance_api_key = "test_key"
+            mock_get_client.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_get_client.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_schema.model_validate.return_value = MagicMock()
+
+            await meter_cost("user_123", 5.0, workspace_id="workspace_1")
+
+        sent_body = mock_client.post.call_args.kwargs["json"]
+        assert sent_body["workspace_id"] == "workspace_1"
 
 
 @pytest.mark.unit

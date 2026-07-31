@@ -4,6 +4,8 @@ from fastapi_mongo_base.schemas import TenantUserEntitySchema
 from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import Field
 
+from utils.workspace import WorkspaceScopedSchema
+
 
 class VideoGenTaskSchemaCreate(TaskCreateFieldsMixin):
     """Schema for creating a video generation task."""
@@ -18,7 +20,7 @@ class VideoGenTaskSchemaCreate(TaskCreateFieldsMixin):
 
 
 class VideoGenTaskSchema(
-    TenantUserEntitySchema, TaskMixin, VideoGenTaskSchemaCreate
+    TenantUserEntitySchema, TaskMixin, WorkspaceScopedSchema, VideoGenTaskSchemaCreate
 ):
     """Full video generation task schema, including provider result fields."""
 

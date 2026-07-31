@@ -13,6 +13,7 @@ from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import Field
 
 from utils.downloaders import download_bytes
+from utils.workspace import WorkspaceScopedSchema
 
 
 class OcrEngineType(StrEnum):
@@ -139,7 +140,9 @@ class OcrTaskBase64Schema(TaskCreateFieldsMixin):
         )
 
 
-class OcrTaskSchema(TenantUserEntitySchema, TaskMixin, OcrTaskSchemaCreate):
+class OcrTaskSchema(
+    TenantUserEntitySchema, TaskMixin, WorkspaceScopedSchema, OcrTaskSchemaCreate
+):
     """Complete OCR task schema including result and usage fields."""
 
     result: str | None = None

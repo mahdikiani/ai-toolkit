@@ -4,6 +4,8 @@ from fastapi_mongo_base.schemas import TenantUserEntitySchema
 from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import Field
 
+from utils.workspace import WorkspaceScopedSchema
+
 
 class TextToSpeechTaskSchemaCreate(TaskCreateFieldsMixin):
     """Schema for creating a text-to-speech task."""
@@ -16,7 +18,10 @@ class TextToSpeechTaskSchemaCreate(TaskCreateFieldsMixin):
 
 
 class TextToSpeechTaskSchema(
-    TenantUserEntitySchema, TaskMixin, TextToSpeechTaskSchemaCreate
+    TenantUserEntitySchema,
+    TaskMixin,
+    WorkspaceScopedSchema,
+    TextToSpeechTaskSchemaCreate,
 ):
     """Full text-to-speech task schema, including provider result fields."""
 

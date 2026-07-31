@@ -4,6 +4,8 @@ from fastapi_mongo_base.schemas import TenantUserEntitySchema
 from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import Field
 
+from utils.workspace import WorkspaceScopedSchema
+
 
 class WebSearchTaskSchemaCreate(TaskCreateFieldsMixin):
     """Fields accepted when creating a web search task."""
@@ -15,7 +17,10 @@ class WebSearchTaskSchemaCreate(TaskCreateFieldsMixin):
 
 
 class WebSearchTaskSchema(
-    TenantUserEntitySchema, TaskMixin, WebSearchTaskSchemaCreate
+    TenantUserEntitySchema,
+    TaskMixin,
+    WorkspaceScopedSchema,
+    WebSearchTaskSchemaCreate,
 ):
     """Complete web search task schema with lifecycle tracking."""
 

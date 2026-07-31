@@ -193,6 +193,7 @@ async def persist_realtime_session(
             "file_url": file_url or "realtime://missing-audio",
             "tenant_id": user.tenant_id,
             "user_id": str(user.uid),
+            "workspace_id": user.workspace_id,
             "provider": "soniox",
             "model": model,
             "result": transcript or None,
@@ -227,6 +228,7 @@ async def meter_realtime_session(
     final_audio_proc_ms: int | float | None,
     total_audio_proc_ms: int | float | None,
     task_uid: str | None = None,
+    workspace_id: str | None = None,
 ) -> None:
     """Meter transcription cost; log failures without failing the session."""
     duration_s = duration_seconds_from_proc_ms(
@@ -249,6 +251,7 @@ async def meter_realtime_session(
                 "task_uid": task_uid,
                 "audio_duration_seconds": duration_s,
             },
+            workspace_id=workspace_id,
         )
     except Exception:
         logger.exception("Realtime meter_cost failed for user %s", user_id)
@@ -576,6 +579,7 @@ async def _run_bridge(websocket: WebSocket, user: UserData) -> None:
         final_audio_proc_ms=progress_final,
         total_audio_proc_ms=progress_total,
         task_uid=str(task.uid) if task is not None else None,
+        workspace_id=user.workspace_id,
     )
 
     if persist_error:

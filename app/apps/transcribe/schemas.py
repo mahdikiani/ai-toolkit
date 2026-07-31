@@ -12,6 +12,7 @@ from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import BaseModel, Field
 
 from utils.downloaders import download_bytes
+from utils.workspace import WorkspaceScopedSchema
 
 
 class TranscribeTaskSchemaCreate(TaskCreateFieldsMixin):
@@ -133,7 +134,10 @@ class TranscribeTaskBase64Schema(TaskCreateFieldsMixin):
 
 
 class TranscribeTaskSchema(
-    TenantUserEntitySchema, TaskMixin, TranscribeTaskSchemaCreate
+    TenantUserEntitySchema,
+    TaskMixin,
+    WorkspaceScopedSchema,
+    TranscribeTaskSchemaCreate,
 ):
     """Complete transcription task schema including result and chunk metadata."""
 

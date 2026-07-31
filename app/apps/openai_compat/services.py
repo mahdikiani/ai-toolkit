@@ -67,6 +67,7 @@ async def meter_chat_usage(
     provider_meta: dict | None = None,
     content: str | None = None,
     service: str = "openai_compat",
+    workspace_id: str | None = None,
 ) -> None:
     """Meter chat usage from provider meta, usage dict, or content estimate."""
     meta = provider_meta or {}
@@ -92,6 +93,7 @@ async def meter_chat_usage(
         user_id,
         amount,
         meta_data={"service": service, "provider_meta": meta},
+        workspace_id=workspace_id,
     )
 
 
@@ -101,10 +103,11 @@ async def handle_non_stream_chat(
     user_id: str,
     model: str,
     service: str = "openai_compat",
+    workspace_id: str | None = None,
 ) -> JSONResponse:
     """Non-streaming completion with quota check + metering."""
     estimated = estimate_chat_cost(body)
-    await finance.check_quota_or_error(user_id, estimated)
+    await finance.check_quota_or_error(user_id, estimated, workspace_id=workspace_id)
 
     resp = await post_chat_completion_unchecked(body)
     if resp.status_code >= 400:
@@ -127,6 +130,7 @@ async def handle_non_stream_chat(
             usage=usage if isinstance(usage, dict) else None,
             provider_meta=provider_meta,
             service=service,
+            workspace_id=workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter openai_compat non-stream usage")
@@ -253,6 +257,7 @@ async def _stream_chat_events(
     *,
     user_id: str,
     service: str,
+    workspace_id: str | None = None,
 ) -> AsyncIterator[bytes]:
     """Yield OpenAI SSE bytes and meter usage when the stream ends."""
     resp_id = openai_chat_id()
@@ -310,6 +315,7 @@ async def _stream_chat_events(
                 provider_meta=last_provider_meta,
                 content="".join(full_content),
                 service=service,
+                workspace_id=workspace_id,
             )
         except Exception:
             logger.exception("Failed to meter openai_compat stream usage")
@@ -320,12 +326,15 @@ async def handle_stream_chat(
     *,
     user_id: str,
     service: str = "openai_compat",
+    workspace_id: str | None = None,
 ) -> StreamingResponse:
     """Streaming completion with quota pre-check and post-stream metering."""
     estimated = estimate_chat_cost(body)
-    await finance.check_quota_or_error(user_id, estimated)
+    await finance.check_quota_or_error(user_id, estimated, workspace_id=workspace_id)
     return StreamingResponse(
-        _stream_chat_events(body, user_id=user_id, service=service),
+        _stream_chat_events(
+            body, user_id=user_id, service=service, workspace_id=workspace_id
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

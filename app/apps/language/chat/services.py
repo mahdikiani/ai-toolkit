@@ -45,18 +45,21 @@ async def bootstrap_session(
     thread_title: str | None = None,
     chat_model: str | None = None,
     suggest_title: bool = True,
+    workspace_id: str | None = None,
 ) -> tuple[ChatSession, ChatThread]:
     """Create a session and its first thread."""
     session = await ChatSession.create_item({
         "title": title,
         "suggest_title": suggest_title,
         "user_id": user_id,
+        "workspace_id": workspace_id,
     })
     thread = await ChatThread.create_item({
         "session_uid": session.uid,
         "title": thread_title or "Thread 1",
         "chat_model": chat_model,
         "user_id": user_id,
+        "workspace_id": workspace_id,
     })
     session.active_thread_uid = thread.uid
     await session.save()
@@ -136,6 +139,7 @@ async def evaluate_session_title(
                     "prompt": SESSION_TITLE_PROMPT,
                     "provider_meta": provider_meta,
                 },
+                workspace_id=thread.workspace_id,
             )
         except Exception:
             logger.exception("Failed to meter session-title usage for %s", user_id)
@@ -194,6 +198,7 @@ async def suggest_title_from_exchange(
     assistant_content: str | None = None,
     model: str | None = None,
     kind: Literal["session", "thread"] = "session",
+    workspace_id: str | None = None,
 ) -> str | None:
     """Ask OpenRouter for a short title based on a single exchange."""
     model = model or Settings.title_model
@@ -251,6 +256,7 @@ async def suggest_title_from_exchange(
                 "kind": f"{kind}_title",
                 "provider_meta": provider_meta,
             },
+            workspace_id=workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter %s-title usage for %s", kind, user_id)
@@ -279,6 +285,7 @@ async def maybe_apply_suggested_thread_title(
         assistant_content=assistant_content,
         model=model or Settings.title_model,
         kind="thread",
+        workspace_id=thread.workspace_id,
     )
     if suggested:
         thread.title = suggested
@@ -361,7 +368,9 @@ async def iter_billed_reply_stream(
     payload = {"model": model, "messages": msgs, "temperature": 0.7}
 
     estimated = _estimate_reply_cost(msgs, model)
-    await finance.check_quota_or_error(user_id, estimated)
+    await finance.check_quota_or_error(
+        user_id, estimated, workspace_id=thread.workspace_id
+    )
 
     last_usage: dict | None = None
     try:
@@ -393,6 +402,7 @@ async def iter_billed_reply_stream(
                     "thread_uid": thread.uid,
                     "provider_meta": {"model": model, "usage": last_usage},
                 },
+                workspace_id=thread.workspace_id,
             )
         except Exception:
             logger.exception(
@@ -432,7 +442,9 @@ async def complete_assistant_message(
     }
 
     estimated = _estimate_reply_cost(msgs, model)
-    await finance.check_quota_or_error(user_id, estimated)
+    await finance.check_quota_or_error(
+        user_id, estimated, workspace_id=thread.workspace_id
+    )
 
     try:
         raw_json = await openrouter_client.complete_chat_json(payload)
@@ -465,6 +477,7 @@ async def complete_assistant_message(
                 "thread_uid": thread.uid,
                 "provider_meta": provider_meta,
             },
+            workspace_id=thread.workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter chat usage for thread %s", thread.uid)

@@ -24,7 +24,9 @@ async def process_voice_morph(task: VoiceMorphTask) -> VoiceMorphTask:
 
     pricing = finance.pricing_config().get("voice_morph") or {}
     amount = float(pricing.get("default_per_request", 1.0))
-    quota = await finance.check_quota(task.user_id, amount, raise_exception=False)
+    quota = await finance.check_quota(
+        task.user_id, amount, raise_exception=False, workspace_id=task.workspace_id
+    )
     if quota < amount:
         task.task_status = TaskStatusEnum.error
         await task.save_report("insufficient_quota")
@@ -69,6 +71,7 @@ async def process_voice_morph(task: VoiceMorphTask) -> VoiceMorphTask:
                 "provider": "replicate",
                 "model": model_key,
             },
+            workspace_id=task.workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter voice morph usage")

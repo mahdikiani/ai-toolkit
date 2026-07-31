@@ -73,7 +73,10 @@ async def process_translate(task: TranslateTask) -> TranslateTask:
             usage={"total_tokens": max(100, len(task.text) // 4) * 2},
         )
         quota = await finance.check_quota(
-            task.user_id, estimated, raise_exception=False
+            task.user_id,
+            estimated,
+            raise_exception=False,
+            workspace_id=task.workspace_id,
         )
         if quota < estimated:
             task.error = "insufficient_quota"
@@ -113,6 +116,7 @@ async def process_translate(task: TranslateTask) -> TranslateTask:
                     "prompt": "translate",
                     "provider_meta": provider_meta,
                 },
+                workspace_id=task.workspace_id,
             )
         except Exception:
             logger.exception("Failed to meter translate usage for task %s", task.uid)

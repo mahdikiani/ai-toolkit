@@ -91,11 +91,16 @@ async def chat_completions(
         or_body["stream"] = True
 
     user_id = getattr(user, "uid", None) or getattr(user, "user_id", "")
+    workspace_id = getattr(user, "workspace_id", None)
 
     if stream:
-        return await services.handle_stream_chat(or_body, user_id=user_id)
+        return await services.handle_stream_chat(
+            or_body, user_id=user_id, workspace_id=workspace_id
+        )
 
-    return await services.handle_non_stream_chat(or_body, user_id=user_id, model=model)
+    return await services.handle_non_stream_chat(
+        or_body, user_id=user_id, model=model, workspace_id=workspace_id
+    )
 
 
 @router.post("/audio/speech")
@@ -115,7 +120,10 @@ async def audio_speech(
             400, "invalid_request_error", "Body must be a JSON object"
         )
     user_id = getattr(user, "uid", None) or getattr(user, "user_id", "")
-    return await audio_api.create_speech(body, user_id=user_id)
+    workspace_id = getattr(user, "workspace_id", None)
+    return await audio_api.create_speech(
+        body, user_id=user_id, workspace_id=workspace_id
+    )
 
 
 @router.post("/audio/transcriptions")
@@ -128,6 +136,7 @@ async def audio_transcriptions(
 ) -> dict:
     """OpenAI-compatible transcriptions backed by Soniox."""
     user_id = getattr(user, "uid", None) or getattr(user, "user_id", "")
+    workspace_id = getattr(user, "workspace_id", None)
     content = await file.read()
     filename = file.filename or "audio.wav"
     return await audio_api.create_transcription(
@@ -137,6 +146,7 @@ async def audio_transcriptions(
         model=model,
         language=language,
         response_format=response_format,
+        workspace_id=workspace_id,
     )
 
 
@@ -157,7 +167,10 @@ async def image_generations(
             400, "invalid_request_error", "Body must be a JSON object"
         )
     user_id = getattr(user, "uid", None) or getattr(user, "user_id", "")
-    return await images_api.create_generation(body, user_id=user_id)
+    workspace_id = getattr(user, "workspace_id", None)
+    return await images_api.create_generation(
+        body, user_id=user_id, workspace_id=workspace_id
+    )
 
 
 @router.post("/images/edits")
@@ -173,6 +186,7 @@ async def image_edits(
 ) -> object:
     """OpenAI-compatible image edits via OpenRouter."""
     user_id = getattr(user, "uid", None) or getattr(user, "user_id", "")
+    workspace_id = getattr(user, "workspace_id", None)
     image_bytes = await file.read()
     mask_bytes = await mask.read() if mask else None
     body = {
@@ -183,5 +197,9 @@ async def image_edits(
         "response_format": response_format,
     }
     return await images_api.create_edit(
-        body, user_id=user_id, image_bytes=image_bytes, mask_bytes=mask_bytes
+        body,
+        user_id=user_id,
+        image_bytes=image_bytes,
+        mask_bytes=mask_bytes,
+        workspace_id=workspace_id,
     )

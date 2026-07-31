@@ -58,7 +58,7 @@ class TestWsAuth:
         """authenticate_websocket should delegate to jwt_access_security_ws."""
         websocket = MagicMock()
         websocket.query_params = {}
-        user = SimpleNamespace(uid="u1", tenant_id="t1")
+        user = SimpleNamespace(uid="u1", tenant_id="t1", workspace_id=None)
         usso = MagicMock()
         usso.jwt_access_security_ws.return_value = user
 
@@ -167,7 +167,7 @@ class TestPersistAndMeter:
     @pytest.mark.asyncio
     async def test_persist_uploads_and_creates_task(self) -> None:
         """Successful persist should upload audio and create TranscribeTask."""
-        user = SimpleNamespace(uid="u1", tenant_id="t1")
+        user = SimpleNamespace(uid="u1", tenant_id="t1", workspace_id=None)
         task = SimpleNamespace(uid="task-1")
 
         with (
@@ -205,7 +205,7 @@ class TestPersistAndMeter:
     @pytest.mark.asyncio
     async def test_persist_upload_failure(self) -> None:
         """Upload failure should return an error without creating a task."""
-        user = SimpleNamespace(uid="u1", tenant_id="t1")
+        user = SimpleNamespace(uid="u1", tenant_id="t1", workspace_id=None)
 
         with (
             patch(
@@ -328,7 +328,7 @@ class TestHandleRealtimeSession:
         websocket.close = AsyncMock()
         websocket.accept = AsyncMock()
         websocket.send_text = AsyncMock()
-        user = SimpleNamespace(uid="u1", tenant_id="t1")
+        user = SimpleNamespace(uid="u1", tenant_id="t1", workspace_id=None)
 
         with (
             patch(
@@ -366,7 +366,7 @@ class TestHandleRealtimeSession:
             ),
             '{"finished":true,"final_audio_proc_ms":1200,"total_audio_proc_ms":1300}',
         ])
-        user = SimpleNamespace(uid="user-1", tenant_id="tenant-1")
+        user = SimpleNamespace(uid="user-1", tenant_id="tenant-1", workspace_id=None)
         task = SimpleNamespace(uid="task-99")
 
         with (

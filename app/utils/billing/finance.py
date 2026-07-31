@@ -66,6 +66,14 @@ DEFAULT_PRICING: PricingConfig = {
         "markup": 1.0,
         "default_per_search": 1.0,
     },
+    "video": {
+        "markup": 1.0,
+        "default_per_video": 1.0,
+    },
+    "voice_morph": {
+        "markup": 1.0,
+        "default_per_request": 1.0,
+    },
 }
 
 
@@ -155,7 +163,11 @@ async def get_ufaas_client() -> AsyncGenerator[httpx.AsyncClient]:
 
 
 async def meter_cost(
-    user_id: str, amount: float, meta_data: dict | None = None
+    user_id: str,
+    amount: float,
+    meta_data: dict | None = None,
+    *,
+    workspace_id: str | None = None,
 ) -> UsageSchema | None:
     """
     Record usage cost for a user.
@@ -164,6 +176,9 @@ async def meter_cost(
         user_id: The user's unique identifier.
         amount: The cost amount to meter.
         meta_data: Optional metadata to attach to the usage record.
+        workspace_id: When set, the cost is drawn from the workspace's
+            shared quota pool instead of the user's personal balance,
+            while user_id still records who incurred it.
 
     Returns:
         The created usage record schema.
@@ -173,6 +188,7 @@ async def meter_cost(
     async with get_ufaas_client() as ufaas_client:
         usage_schema = UsageCreateSchema(
             user_id=user_id,
+            workspace_id=workspace_id,
             asset="coin",
             amount=Decimal(str(amount)),
             variant=resource_variant,
@@ -186,23 +202,25 @@ async def meter_cost(
         return usage
 
 
-async def get_quota(user_id: str) -> Decimal:
+async def get_quota(user_id: str, *, workspace_id: str | None = None) -> Decimal:
     """
-    Retrieve the remaining quota for a user.
+    Retrieve the remaining quota for a user or a workspace.
 
     Args:
         user_id: The user's unique identifier.
+        workspace_id: When set, the pooled quota of the workspace is
+            returned instead of the user's personal quota.
 
     Returns:
-        The user's remaining quota, or infinity if finance is disabled.
+        The remaining quota, or infinity if finance is disabled.
     """
     if not Settings.finance_api_key:
         return Decimal("inf")
+    params = {"user_id": user_id, "asset": "coin", "variant": resource_variant}
+    if workspace_id:
+        params["workspace_id"] = workspace_id
     async with get_ufaas_client() as ufaas_client:
-        quotas_response = await ufaas_client.get(
-            "/enrollments/quotas",
-            params={"user_id": user_id, "asset": "coin", "variant": resource_variant},
-        )
+        quotas_response = await ufaas_client.get("/enrollments/quotas", params=params)
         quotas_response.raise_for_status()
         quotas = QuotaSchema.model_validate(quotas_response.json())
     return quotas.quota
@@ -226,23 +244,29 @@ async def cancel_usage(usage_id: str | None) -> None:
 
 
 async def check_quota(
-    user_id: str, coin: float, *, raise_exception: bool = True
+    user_id: str,
+    coin: float,
+    *,
+    raise_exception: bool = True,
+    workspace_id: str | None = None,
 ) -> Decimal:
     """
-    Check if a user has sufficient quota.
+    Check if a user (or their workspace) has sufficient quota.
 
     Args:
         user_id: The user's unique identifier.
         coin: The required coin amount.
         raise_exception: Whether to raise an exception on insufficient funds.
+        workspace_id: When set, checks the workspace's pooled quota instead
+            of the user's personal quota.
 
     Returns:
-        The user's current quota.
+        The current quota.
 
     Raises:
         InsufficientFundsError: If quota is insufficient and raise_exception is True.
     """
-    quota = await get_quota(user_id)
+    quota = await get_quota(user_id, workspace_id=workspace_id)
     if raise_exception and (quota is None or quota < coin):
         error = _insufficient_funds_error(
             f"You have only {quota} coins, while you need {coin} coins."
@@ -251,7 +275,9 @@ async def check_quota(
     return quota
 
 
-async def check_quota_or_error(user_id: str, coin: float) -> Decimal:
+async def check_quota_or_error(
+    user_id: str, coin: float, *, workspace_id: str | None = None
+) -> Decimal:
     """
     Pre-flight quota check for direct request/response handlers.
 
@@ -263,7 +289,9 @@ async def check_quota_or_error(user_id: str, coin: float) -> Decimal:
     server fault.
     """
     try:
-        return await check_quota(user_id, coin, raise_exception=True)
+        return await check_quota(
+            user_id, coin, raise_exception=True, workspace_id=workspace_id
+        )
     except exceptions.InsufficientFundsError as exc:
         raise BaseHTTPException(
             status_code=402,

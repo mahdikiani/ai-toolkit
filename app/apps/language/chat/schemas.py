@@ -5,6 +5,8 @@ from typing import Literal
 from fastapi_mongo_base.schemas import UserOwnedEntitySchema
 from pydantic import BaseModel, Field
 
+from utils.workspace import WorkspaceScopedSchema
+
 
 class ChatSessionCreate(BaseModel):
     """Create a chat session (first thread is created automatically)."""
@@ -30,7 +32,9 @@ class ChatSessionUpdate(BaseModel):
     )
 
 
-class ChatSessionSchema(UserOwnedEntitySchema, ChatSessionUpdate):
+class ChatSessionSchema(
+    UserOwnedEntitySchema, WorkspaceScopedSchema, ChatSessionUpdate
+):
     """Stored chat session."""
 
     suggest_title: bool = Field(
@@ -52,7 +56,7 @@ class ChatThreadCreate(BaseModel):
     )
 
 
-class ChatThreadSchema(UserOwnedEntitySchema, ChatThreadCreate):
+class ChatThreadSchema(UserOwnedEntitySchema, WorkspaceScopedSchema, ChatThreadCreate):
     """Stored chat thread."""
 
     session_uid: str = Field(..., description="Owning session uid")
@@ -87,7 +91,7 @@ class ChatMessageCreate(BaseModel):
     )
 
 
-class ChatMessageSchema(UserOwnedEntitySchema):
+class ChatMessageSchema(UserOwnedEntitySchema, WorkspaceScopedSchema):
     """Stored chat message."""
 
     thread_uid: str

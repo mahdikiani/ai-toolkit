@@ -141,6 +141,7 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
             thread_title=data.initial_thread_title,
             chat_model=data.initial_chat_model,
             suggest_title=True,
+            workspace_id=user.workspace_id,
         )
         return session
 
@@ -231,6 +232,7 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
             **data.model_dump(exclude_none=True),
             "session_uid": session.uid,
             "user_id": self._owner_id_for_create(user),
+            "workspace_id": user.workspace_id,
         })
 
     async def retrieve_thread(
@@ -327,6 +329,7 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
                 assistant = await ChatMessage.create_item({
                     "thread_uid": thread.uid,
                     "user_id": owner_id,
+                    "workspace_id": user.workspace_id,
                     "role": "assistant",
                     "content": full.strip(),
                     "completion_extra": {
@@ -378,10 +381,12 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
             thread_title=data.thread_title,
             chat_model=data.chat_model,
             suggest_title=data.suggest_title,
+            workspace_id=user.workspace_id,
         )
         user_msg = await ChatMessage.create_item({
             "thread_uid": thread.uid,
             "user_id": owner_id,
+            "workspace_id": user.workspace_id,
             "role": data.role,
             "content": data.content,
             "reply_to_uid": data.reply_to_uid,
@@ -417,6 +422,7 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
                 assistant = await ChatMessage.create_item({
                     "thread_uid": thread.uid,
                     "user_id": owner_id,
+                    "workspace_id": user.workspace_id,
                     "role": "assistant",
                     "content": full.strip(),
                     "completion_extra": {
@@ -483,6 +489,7 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
             "title": data.thread_title,
             "chat_model": data.chat_model,
             "user_id": owner_id,
+            "workspace_id": user.workspace_id,
         })
         session.active_thread_uid = thread.uid
         await session.save()
@@ -490,6 +497,7 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
         user_msg = await ChatMessage.create_item({
             "thread_uid": thread.uid,
             "user_id": owner_id,
+            "workspace_id": user.workspace_id,
             "role": data.role,
             "content": data.content,
             "reply_to_uid": data.reply_to_uid,
@@ -527,6 +535,7 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
                 assistant = await ChatMessage.create_item({
                     "thread_uid": thread.uid,
                     "user_id": owner_id,
+                    "workspace_id": user.workspace_id,
                     "role": "assistant",
                     "content": full.strip(),
                     "completion_extra": {
@@ -595,6 +604,7 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
         user_msg = await ChatMessage.create_item({
             "thread_uid": thread.uid,
             "user_id": owner_id,
+            "workspace_id": user.workspace_id,
             "role": data.role,
             "content": data.content,
             "reply_to_uid": data.reply_to_uid,

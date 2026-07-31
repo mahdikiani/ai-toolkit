@@ -328,6 +328,7 @@ class TestOcrQuotaAndErrorHandling:
         task = MagicMock()
         task.uid = "task_123"
         task.user_id = "user_123"
+        task.workspace_id = None
         task.ocr_engine = None
         task.file_content = AsyncMock(return_value=BytesIO(b"fake_image_data"))
         task.save_report = AsyncMock()
@@ -358,7 +359,9 @@ class TestOcrQuotaAndErrorHandling:
             await process_ocr(task)
 
         # Verify quota was checked with correct parameters
-        mock_check_quota.assert_called_once_with("user_123", 2, raise_exception=False)
+        mock_check_quota.assert_called_once_with(
+            "user_123", 2, raise_exception=False, workspace_id=None
+        )
 
     async def test_usage_metered_after_processing(self) -> None:
         """process_ocr should meter usage after successful OCR processing."""
@@ -367,6 +370,7 @@ class TestOcrQuotaAndErrorHandling:
         task = MagicMock()
         task.uid = "task_123"
         task.user_id = "user_123"
+        task.workspace_id = None
         task.ocr_engine = None
         task.file_content = AsyncMock(return_value=BytesIO(b"fake_image_data"))
         task.save_report = AsyncMock()
@@ -404,6 +408,7 @@ class TestOcrQuotaAndErrorHandling:
             "user_123",
             3.0,
             meta_data={"service": "ocr", "engine": "llm", "pages": 3},
+            workspace_id=None,
         )
 
         # Verify usage info was saved to task

@@ -80,7 +80,9 @@ async def process_imagination(task: ImaginationTask) -> ImaginationTask:
         return task
 
     estimated = _estimate_imagination_cost(task)
-    quota = await finance.check_quota(task.user_id, estimated, raise_exception=False)
+    quota = await finance.check_quota(
+        task.user_id, estimated, raise_exception=False, workspace_id=task.workspace_id
+    )
     if quota < estimated:
         task.task_status = TaskStatusEnum.error
         task.result_url = None
@@ -132,6 +134,7 @@ async def process_imagination(task: ImaginationTask) -> ImaginationTask:
                 "model": task.model or "openai/dall-e-3",
                 "enhanced": task.enhance_prompt,
             },
+            workspace_id=task.workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter imagination usage")

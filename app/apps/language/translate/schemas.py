@@ -4,6 +4,8 @@ from fastapi_mongo_base.schemas import TenantUserEntitySchema
 from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import Field
 
+from utils.workspace import WorkspaceScopedSchema
+
 
 class TranslateSchemaCreate(TaskCreateFieldsMixin):
     """Schema for creating a new translation task."""
@@ -15,7 +17,9 @@ class TranslateSchemaCreate(TaskCreateFieldsMixin):
     )
 
 
-class TranslateSchema(TenantUserEntitySchema, TaskMixin, TranslateSchemaCreate):
+class TranslateSchema(
+    TenantUserEntitySchema, TaskMixin, WorkspaceScopedSchema, TranslateSchemaCreate
+):
     """Complete translation task schema including result and usage fields."""
 
     result: str | None = None

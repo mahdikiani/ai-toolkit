@@ -4,6 +4,8 @@ from fastapi_mongo_base.schemas import TenantUserEntitySchema
 from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import Field
 
+from utils.workspace import WorkspaceScopedSchema
+
 
 class ImaginationTaskSchemaCreate(TaskCreateFieldsMixin):
     """Fields accepted when creating an imagination task."""
@@ -15,7 +17,10 @@ class ImaginationTaskSchemaCreate(TaskCreateFieldsMixin):
 
 
 class ImaginationTaskSchema(
-    TenantUserEntitySchema, TaskMixin, ImaginationTaskSchemaCreate
+    TenantUserEntitySchema,
+    TaskMixin,
+    WorkspaceScopedSchema,
+    ImaginationTaskSchemaCreate,
 ):
     """Complete imagination task schema with lifecycle tracking."""
 

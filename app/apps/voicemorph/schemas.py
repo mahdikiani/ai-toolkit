@@ -4,6 +4,8 @@ from fastapi_mongo_base.schemas import TenantUserEntitySchema
 from fastapi_mongo_base.tasks import TaskCreateFieldsMixin, TaskMixin
 from pydantic import Field
 
+from utils.workspace import WorkspaceScopedSchema
+
 
 class VoiceMorphTaskSchemaCreate(TaskCreateFieldsMixin):
     """Schema for creating a voice morph task."""
@@ -16,7 +18,10 @@ class VoiceMorphTaskSchemaCreate(TaskCreateFieldsMixin):
 
 
 class VoiceMorphTaskSchema(
-    TenantUserEntitySchema, TaskMixin, VoiceMorphTaskSchemaCreate
+    TenantUserEntitySchema,
+    TaskMixin,
+    WorkspaceScopedSchema,
+    VoiceMorphTaskSchemaCreate,
 ):
     """Full voice morph task schema, including provider result fields."""
 

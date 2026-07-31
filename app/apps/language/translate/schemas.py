@@ -7,7 +7,7 @@ from pydantic import Field
 from utils.workspace import WorkspaceScopedSchema
 
 
-class TranslateSchemaCreate(TaskCreateFieldsMixin):
+class TranslateSchemaCreate(TaskCreateFieldsMixin, WorkspaceScopedSchema):
     """Schema for creating a new translation task."""
 
     text: str
@@ -18,7 +18,7 @@ class TranslateSchemaCreate(TaskCreateFieldsMixin):
 
 
 class TranslateSchema(
-    TenantUserEntitySchema, TaskMixin, WorkspaceScopedSchema, TranslateSchemaCreate
+    TenantUserEntitySchema, TaskMixin, TranslateSchemaCreate
 ):
     """Complete translation task schema including result and usage fields."""
 

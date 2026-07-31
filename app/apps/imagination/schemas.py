@@ -7,7 +7,7 @@ from pydantic import Field
 from utils.workspace import WorkspaceScopedSchema
 
 
-class ImaginationTaskSchemaCreate(TaskCreateFieldsMixin):
+class ImaginationTaskSchemaCreate(TaskCreateFieldsMixin, WorkspaceScopedSchema):
     """Fields accepted when creating an imagination task."""
 
     prompt: str = Field(..., min_length=1, description="Imagination prompt")
@@ -19,7 +19,6 @@ class ImaginationTaskSchemaCreate(TaskCreateFieldsMixin):
 class ImaginationTaskSchema(
     TenantUserEntitySchema,
     TaskMixin,
-    WorkspaceScopedSchema,
     ImaginationTaskSchemaCreate,
 ):
     """Complete imagination task schema with lifecycle tracking."""

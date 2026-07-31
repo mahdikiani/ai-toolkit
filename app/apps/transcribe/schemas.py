@@ -15,7 +15,7 @@ from utils.downloaders import download_bytes
 from utils.workspace import WorkspaceScopedSchema
 
 
-class TranscribeTaskSchemaCreate(TaskCreateFieldsMixin):
+class TranscribeTaskSchemaCreate(TaskCreateFieldsMixin, WorkspaceScopedSchema):
     """Schema for creating a new transcription task."""
 
     file_url: str
@@ -136,7 +136,6 @@ class TranscribeTaskBase64Schema(TaskCreateFieldsMixin):
 class TranscribeTaskSchema(
     TenantUserEntitySchema,
     TaskMixin,
-    WorkspaceScopedSchema,
     TranscribeTaskSchemaCreate,
 ):
     """Complete transcription task schema including result and chunk metadata."""

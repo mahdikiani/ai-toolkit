@@ -9,7 +9,7 @@ from utils.workspace import WorkspaceScopedSchema
 from .video_id import YouTubeVideoIdTypeError, parse_youtube_video_id
 
 
-class YoutubeTranscriptTaskSchemaCreate(TaskCreateFieldsMixin):
+class YoutubeTranscriptTaskSchemaCreate(TaskCreateFieldsMixin, WorkspaceScopedSchema):
     """Schema for creating a YouTube transcription task."""
 
     video_id: str = Field(
@@ -29,7 +29,6 @@ class YoutubeTranscriptTaskSchemaCreate(TaskCreateFieldsMixin):
 class YoutubeTranscriptTaskSchema(
     TenantUserEntitySchema,
     TaskMixin,
-    WorkspaceScopedSchema,
     YoutubeTranscriptTaskSchemaCreate,
 ):
     """Complete YouTube transcription task schema with result."""

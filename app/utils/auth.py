@@ -43,6 +43,31 @@ def is_service_request(request: object) -> bool:
     return bool(request.headers.get("x-api-key"))
 
 
+def _resolve_workspace_id_on_behalf(
+    request: object, user: object, data: object
+) -> None:
+    """
+    Resolve workspace_id on a create payload that declares the field.
+
+    Mirrors the user_id on-behalf pattern: service (API-key) requests may
+    set an explicit workspace_id in the payload to attribute the created
+    resource to a specific workspace (e.g. mirza-bot billing a Telegram
+    user's own workspace instead of the shared service account's). JWT
+    end-users can never claim a workspace other than their own -- always
+    pinned to the requester's workspace_id, so a browser client can't
+    spoof membership in someone else's workspace.
+
+    No-op for payloads that don't declare a workspace_id field.
+    """
+    if not hasattr(data, "workspace_id"):
+        return
+    user_workspace_id = getattr(user, "workspace_id", None)
+    if is_service_request(request):
+        data.workspace_id = getattr(data, "workspace_id", None) or user_workspace_id
+    else:
+        data.workspace_id = user_workspace_id
+
+
 async def authorize_create_on_behalf(
     router: object,
     request: object,
@@ -68,6 +93,7 @@ async def authorize_create_on_behalf(
     if not isinstance(data, UserOwnedCreateData):
         raise TypeError
     data.user_id = data.user_id or user.user_id
+    _resolve_workspace_id_on_behalf(request, user, data)
     if is_service_request(request):
         return
     if not require_create_authorization and data.user_id == user.user_id:

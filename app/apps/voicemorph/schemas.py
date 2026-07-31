@@ -7,7 +7,7 @@ from pydantic import Field
 from utils.workspace import WorkspaceScopedSchema
 
 
-class VoiceMorphTaskSchemaCreate(TaskCreateFieldsMixin):
+class VoiceMorphTaskSchemaCreate(TaskCreateFieldsMixin, WorkspaceScopedSchema):
     """Schema for creating a voice morph task."""
 
     audio_url: str = Field(..., description="Source audio URL to morph")
@@ -20,7 +20,6 @@ class VoiceMorphTaskSchemaCreate(TaskCreateFieldsMixin):
 class VoiceMorphTaskSchema(
     TenantUserEntitySchema,
     TaskMixin,
-    WorkspaceScopedSchema,
     VoiceMorphTaskSchemaCreate,
 ):
     """Full voice morph task schema, including provider result fields."""

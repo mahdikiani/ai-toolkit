@@ -9,7 +9,7 @@ from pydantic import Field
 from utils.workspace import WorkspaceScopedSchema
 
 
-class PrompticCreate(TaskCreateFieldsMixin):
+class PrompticCreate(TaskCreateFieldsMixin, WorkspaceScopedSchema):
     """Schema for creating a promptic run."""
 
     input_variables: dict[str, object] = Field(
@@ -22,9 +22,7 @@ class PrompticCreate(TaskCreateFieldsMixin):
     )
 
 
-class PrompticSchema(
-    TenantUserEntitySchema, TaskMixin, WorkspaceScopedSchema, PrompticCreate
-):
+class PrompticSchema(TenantUserEntitySchema, TaskMixin, PrompticCreate):
     """Complete promptic schema with lifecycle tracking."""
 
     prompt_name: str = Field(..., description="Name of the prompt template")

@@ -7,7 +7,7 @@ from pydantic import Field
 from utils.workspace import WorkspaceScopedSchema
 
 
-class VideoGenTaskSchemaCreate(TaskCreateFieldsMixin):
+class VideoGenTaskSchemaCreate(TaskCreateFieldsMixin, WorkspaceScopedSchema):
     """Schema for creating a video generation task."""
 
     prompt: str = Field(
@@ -20,7 +20,7 @@ class VideoGenTaskSchemaCreate(TaskCreateFieldsMixin):
 
 
 class VideoGenTaskSchema(
-    TenantUserEntitySchema, TaskMixin, WorkspaceScopedSchema, VideoGenTaskSchemaCreate
+    TenantUserEntitySchema, TaskMixin, VideoGenTaskSchemaCreate
 ):
     """Full video generation task schema, including provider result fields."""
 

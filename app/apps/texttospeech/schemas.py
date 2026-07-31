@@ -7,7 +7,7 @@ from pydantic import Field
 from utils.workspace import WorkspaceScopedSchema
 
 
-class TextToSpeechTaskSchemaCreate(TaskCreateFieldsMixin):
+class TextToSpeechTaskSchemaCreate(TaskCreateFieldsMixin, WorkspaceScopedSchema):
     """Schema for creating a text-to-speech task."""
 
     text: str = Field(..., min_length=1, description="Text to convert to speech")
@@ -20,7 +20,6 @@ class TextToSpeechTaskSchemaCreate(TaskCreateFieldsMixin):
 class TextToSpeechTaskSchema(
     TenantUserEntitySchema,
     TaskMixin,
-    WorkspaceScopedSchema,
     TextToSpeechTaskSchemaCreate,
 ):
     """Full text-to-speech task schema, including provider result fields."""

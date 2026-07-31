@@ -17,17 +17,42 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+class _ServiceRequest:
+    """
+    Minimal request stand-in with a real x-api-key header.
+
+    Protocol isinstance checks (utils.auth's RequestWithHeaders et al.)
+    use static attribute lookup, which a bare MagicMock's dynamic
+    auto-attributes don't satisfy -- a real object with a real `headers`
+    dict is required, mirroring tests/unit/test_auth.py's DummyRequest.
+    """
+
+    def __init__(self) -> None:
+        """Set a real x-api-key header, matching a service caller."""
+        self.headers = {"x-api-key": "uak-test"}
+
+
 class TestWebSearchWorkspaceStamping:
-    """create_item should stamp workspace_id from the requesting user."""
+    """
+    create_item should stamp workspace_id from the requesting user.
+
+    Uses the real authorize_create_on_behalf (not mocked): request
+    carries a real x-api-key header, so is_service_request(request) is
+    True, taking the same "service request" path a real API-key caller
+    (e.g. mirza-bot) takes.
+    """
 
     async def test_stamps_workspace_id_when_present(self) -> None:
         from apps.websearch.routes import WebSearchRouter
 
         router = WebSearchRouter.__new__(WebSearchRouter)
-        user = SimpleNamespace(uid="u1", tenant_id="t1", workspace_id="ws1")
-        request = MagicMock()
+        user = SimpleNamespace(
+            uid="u1", user_id="u1", tenant_id="t1", workspace_id="ws1"
+        )
+        request = _ServiceRequest()
         data = SimpleNamespace(
             user_id=None,
+            workspace_id=None,
             model_dump=lambda exclude_none=True: {"query": "q"},
         )
         created_item = MagicMock()
@@ -37,11 +62,7 @@ class TestWebSearchWorkspaceStamping:
         router.model = MagicMock()
         router.model.create_item = AsyncMock(return_value=created_item)
 
-        with patch(
-            "apps.websearch.routes.authorize_create_on_behalf",
-            new_callable=AsyncMock,
-        ):
-            await router.create_item(request, data, background_tasks=MagicMock())
+        await router.create_item(request, data, background_tasks=MagicMock())
 
         call_dict = router.model.create_item.await_args.args[0]
         assert call_dict["workspace_id"] == "ws1"
@@ -50,10 +71,13 @@ class TestWebSearchWorkspaceStamping:
         from apps.websearch.routes import WebSearchRouter
 
         router = WebSearchRouter.__new__(WebSearchRouter)
-        user = SimpleNamespace(uid="u1", tenant_id="t1", workspace_id=None)
-        request = MagicMock()
+        user = SimpleNamespace(
+            uid="u1", user_id="u1", tenant_id="t1", workspace_id=None
+        )
+        request = _ServiceRequest()
         data = SimpleNamespace(
             user_id=None,
+            workspace_id=None,
             model_dump=lambda exclude_none=True: {"query": "q"},
         )
         created_item = MagicMock()
@@ -63,14 +87,41 @@ class TestWebSearchWorkspaceStamping:
         router.model = MagicMock()
         router.model.create_item = AsyncMock(return_value=created_item)
 
-        with patch(
-            "apps.websearch.routes.authorize_create_on_behalf",
-            new_callable=AsyncMock,
-        ):
-            await router.create_item(request, data, background_tasks=MagicMock())
+        await router.create_item(request, data, background_tasks=MagicMock())
 
         call_dict = router.model.create_item.await_args.args[0]
         assert call_dict["workspace_id"] is None
+
+    async def test_service_request_can_override_workspace_id(self) -> None:
+        """
+        A service caller (e.g. mirza-bot) can attribute the resource to
+        a specific workspace, distinct from its own principal's
+        workspace_id -- the on-behalf mechanism that fixes the mirza-bot
+        cross-user leak risk.
+        """
+        from apps.websearch.routes import WebSearchRouter
+
+        router = WebSearchRouter.__new__(WebSearchRouter)
+        user = SimpleNamespace(
+            uid="svc", user_id="svc", tenant_id="t1", workspace_id="svc-ws"
+        )
+        request = _ServiceRequest()
+        data = SimpleNamespace(
+            user_id="telegram-user-1",
+            workspace_id="telegram-user-1-ws",
+            model_dump=lambda exclude_none=True: {"query": "q"},
+        )
+        created_item = MagicMock()
+        created_item.start_processing = AsyncMock()
+
+        router.get_user = AsyncMock(return_value=user)
+        router.model = MagicMock()
+        router.model.create_item = AsyncMock(return_value=created_item)
+
+        await router.create_item(request, data, background_tasks=MagicMock())
+
+        call_dict = router.model.create_item.await_args.args[0]
+        assert call_dict["workspace_id"] == "telegram-user-1-ws"
 
 
 class TestPrompticWorkspaceStamping:
@@ -80,10 +131,13 @@ class TestPrompticWorkspaceStamping:
         from apps.language.promptic.routes import PrompticRouter
 
         router = PrompticRouter.__new__(PrompticRouter)
-        user = SimpleNamespace(uid="u1", tenant_id="t1", workspace_id="ws2")
-        request = MagicMock()
+        user = SimpleNamespace(
+            uid="u1", user_id="u1", tenant_id="t1", workspace_id="ws2"
+        )
+        request = _ServiceRequest()
         data = SimpleNamespace(
             user_id=None,
+            workspace_id=None,
             input_variables={},
             model_dump=lambda exclude_none=True: {},
             model_dump_json=lambda: "{}",
@@ -95,13 +149,7 @@ class TestPrompticWorkspaceStamping:
         router.model = MagicMock()
         router.model.create_item = AsyncMock(return_value=created_item)
 
-        with (
-            patch(
-                "apps.language.promptic.routes.authorize_create_on_behalf",
-                new_callable=AsyncMock,
-            ),
-            patch("apps.language.promptic.routes.services.check_schemas"),
-        ):
+        with patch("apps.language.promptic.routes.services.check_schemas"):
             await router.create_item(
                 request,
                 "prompt_x",

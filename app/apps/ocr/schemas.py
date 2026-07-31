@@ -26,7 +26,7 @@ class OcrEngineType(StrEnum):
     document_intelligence = "document_intelligence"
 
 
-class OcrTaskSchemaCreate(TaskCreateFieldsMixin):
+class OcrTaskSchemaCreate(TaskCreateFieldsMixin, WorkspaceScopedSchema):
     """Schema for creating a new OCR task."""
 
     file_url: str = Field(
@@ -140,9 +140,7 @@ class OcrTaskBase64Schema(TaskCreateFieldsMixin):
         )
 
 
-class OcrTaskSchema(
-    TenantUserEntitySchema, TaskMixin, WorkspaceScopedSchema, OcrTaskSchemaCreate
-):
+class OcrTaskSchema(TenantUserEntitySchema, TaskMixin, OcrTaskSchemaCreate):
     """Complete OCR task schema including result and usage fields."""
 
     result: str | None = None

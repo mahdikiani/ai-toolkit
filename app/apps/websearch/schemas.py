@@ -7,7 +7,7 @@ from pydantic import Field
 from utils.workspace import WorkspaceScopedSchema
 
 
-class WebSearchTaskSchemaCreate(TaskCreateFieldsMixin):
+class WebSearchTaskSchemaCreate(TaskCreateFieldsMixin, WorkspaceScopedSchema):
     """Fields accepted when creating a web search task."""
 
     query: str = Field(..., min_length=1, description="Search query")
@@ -19,7 +19,6 @@ class WebSearchTaskSchemaCreate(TaskCreateFieldsMixin):
 class WebSearchTaskSchema(
     TenantUserEntitySchema,
     TaskMixin,
-    WorkspaceScopedSchema,
     WebSearchTaskSchemaCreate,
 ):
     """Complete web search task schema with lifecycle tracking."""

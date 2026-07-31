@@ -7,16 +7,14 @@ from pydantic import Field
 from utils.workspace import WorkspaceScopedSchema
 
 
-class WebpageTaskSchemaCreate(TaskCreateFieldsMixin):
+class WebpageTaskSchemaCreate(TaskCreateFieldsMixin, WorkspaceScopedSchema):
     """Schema for creating a webpage extraction task."""
 
     url: str = Field(..., min_length=1, description="Public webpage URL to extract")
     webhook_custom_headers: dict | None = None
 
 
-class WebpageTaskSchema(
-    TenantUserEntitySchema, TaskMixin, WorkspaceScopedSchema, WebpageTaskSchemaCreate
-):
+class WebpageTaskSchema(TenantUserEntitySchema, TaskMixin, WebpageTaskSchemaCreate):
     """Complete webpage extraction task schema with result."""
 
     result: str | None = None

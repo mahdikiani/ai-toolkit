@@ -106,8 +106,14 @@ async def call_openrouter_stream(
     model: str | None = None,
     max_tokens: int | None = None,
     temperature: float = 0.2,
-) -> AsyncIterator[str]:
-    """Call OpenRouter API with streaming."""
+) -> AsyncIterator[tuple[str, dict | None]]:
+    """
+    Call OpenRouter API with streaming.
+
+    Yields ``(text_delta, usage)`` pairs -- ``usage`` is ``None`` on every
+    chunk except the terminal one, so callers can bill the real reported
+    cost of a streamed call instead of an estimate.
+    """
     model = model or Settings.default_model
     body: dict = {
         "model": model,
@@ -120,8 +126,10 @@ async def call_openrouter_stream(
     if max_tokens:
         body["max_tokens"] = max_tokens
 
-    async for delta in openrouter_client.stream_chat_deltas(body, api_key=api_key):
-        yield delta
+    async for delta, usage in openrouter_client.stream_chat_deltas_with_usage(
+        body, api_key=api_key
+    ):
+        yield delta, usage
 
 
 def _cost_for(provider_meta: dict[str, object]) -> float:
@@ -305,16 +313,56 @@ async def invoke_stream(task: "PrompticTask") -> AsyncIterator[str]:
         )
         model_cfg = engine.load_model_config(prompt_path)
 
+        # Same pre-flight gate as the non-streaming path -- a streamed
+        # call is just as billable as any other, and must not be
+        # reachable for free by a caller passing stream=true.
+        estimated = _estimate_preflight_cost(model_cfg, task.input_variables)
+        quota = await finance.check_quota(
+            task.user_id, estimated, raise_exception=False
+        )
+        if quota < estimated:
+            task.error = "insufficient_quota"
+            task.task_status = TaskStatusEnum.error
+            await task.save()
+            return
+
         full_response = ""
-        async for chunk in call_openrouter_stream(
+        last_usage: dict | None = None
+        model = model_cfg.get("model")
+        async for chunk, usage in call_openrouter_stream(
             system_prompt,
             user_prompt,
-            model=model_cfg.get("model"),
+            model=model,
             max_tokens=model_cfg.get("max_tokens"),
             temperature=model_cfg.get("temperature", 0.2),
         ):
-            full_response += chunk
-            yield chunk
+            if usage is not None:
+                last_usage = usage
+            if chunk:
+                full_response += chunk
+                yield chunk
+
+        amount = (
+            finance.estimate_text_cost(model=str(model or ""), usage=last_usage)
+            if last_usage
+            else estimated
+        )
+        # A billing-recording failure must never discard an
+        # already-produced streamed response -- see process_promptic.
+        try:
+            await finance.meter_cost(
+                task.user_id,
+                amount,
+                meta_data={
+                    "service": "promptic",
+                    "prompt": task.prompt_name,
+                    "provider_meta": {"model": model, "usage": last_usage},
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to meter promptic stream usage for task %s", task.uid
+            )
 
         # Update task with final result
         task.result = full_response

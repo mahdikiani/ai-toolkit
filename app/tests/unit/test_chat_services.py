@@ -11,6 +11,7 @@ from apps.language.chat.services import (
     SessionTitleSuggestion,
     complete_assistant_message,
     evaluate_session_title,
+    iter_billed_reply_stream,
     maybe_apply_session_title_if_ready,
     messages_as_openrouter,
     openrouter_headers,
@@ -473,6 +474,114 @@ class TestCompleteAssistantMessage:
 
         assert result == mock_created_msg
         assert mock_create.call_args.args[0]["completion_extra"]["usage_id"] is None
+
+
+@pytest.mark.unit
+class TestIterBilledReplyStream:
+    """
+    Tests for iter_billed_reply_stream.
+
+    Regression: streaming replies used to be reachable for free -- no
+    quota check, no metering -- since the streaming code path never
+    called finance at all, unlike complete_assistant_message.
+    """
+
+    async def test_insufficient_quota_blocks_streaming_before_any_call(self) -> None:
+        thread = MagicMock()
+        thread.uid = "thread_uid_123"
+        thread.chat_model = "openai/gpt-4o-mini"
+
+        with (
+            patch(
+                "apps.language.chat.services.messages_as_openrouter",
+                new_callable=AsyncMock,
+                return_value=[{"role": "user", "content": "Hello"}],
+            ),
+            patch(
+                "apps.language.chat.services.finance.check_quota_or_error",
+                new_callable=AsyncMock,
+                side_effect=BaseHTTPException(
+                    status_code=402,
+                    error_code="insufficient_quota",
+                    detail="not enough coins",
+                    message={"en": "not enough coins"},
+                ),
+            ),
+            patch(
+                "apps.language.chat.services.openrouter_client."
+                "stream_chat_deltas_with_usage"
+            ) as mock_stream,
+            pytest.raises(BaseHTTPException) as exc_info,
+        ):
+            async for _ in iter_billed_reply_stream(thread=thread, user_id="user_123"):
+                pass
+
+        assert exc_info.value.status_code == 402
+        mock_stream.assert_not_called()
+
+    async def test_meters_real_usage_reported_by_the_stream(self) -> None:
+        thread = MagicMock()
+        thread.uid = "thread_uid_123"
+        thread.chat_model = "openai/gpt-4o-mini"
+
+        async def mock_stream(*args: object, **kwargs: object):
+            yield "hello", None
+            yield "", {"total_tokens": 42}
+
+        with (
+            patch(
+                "apps.language.chat.services.messages_as_openrouter",
+                new_callable=AsyncMock,
+                return_value=[{"role": "user", "content": "Hello"}],
+            ),
+            patch(
+                "apps.language.chat.services.finance.check_quota",
+                new_callable=AsyncMock,
+                return_value=1000,
+            ),
+            patch(
+                "apps.language.chat.services.finance.estimate_text_cost",
+                return_value=0.02,
+            ) as mock_estimate,
+            patch(
+                "apps.language.chat.services.finance.meter_cost",
+                new_callable=AsyncMock,
+            ) as mock_meter,
+            patch(
+                "apps.language.chat.services.openrouter_client."
+                "stream_chat_deltas_with_usage",
+                side_effect=mock_stream,
+            ),
+        ):
+            chunks = [
+                chunk
+                async for chunk in iter_billed_reply_stream(
+                    thread=thread, user_id="user_123"
+                )
+            ]
+
+        assert chunks == ["hello"]
+        final_call = mock_estimate.call_args_list[-1]
+        assert final_call.kwargs["usage"] == {"total_tokens": 42}
+        mock_meter.assert_awaited_once()
+        assert mock_meter.call_args.args[1] == pytest.approx(0.02)
+
+    async def test_raises_400_when_no_messages(self) -> None:
+        thread = MagicMock()
+        thread.uid = "thread_uid_123"
+
+        with (
+            patch(
+                "apps.language.chat.services.messages_as_openrouter",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            pytest.raises(BaseHTTPException) as exc_info,
+        ):
+            async for _ in iter_billed_reply_stream(thread=thread, user_id="user_123"):
+                pass
+
+        assert exc_info.value.status_code == 400
 
 
 @pytest.mark.unit

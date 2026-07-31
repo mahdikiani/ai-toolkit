@@ -169,15 +169,19 @@ class TestCallOpenrouterStream:
     """Tests for call_openrouter_stream function."""
 
     async def test_yields_chunks_from_stream(self) -> None:
-        """call_openrouter_stream should yield chunks from the streaming API."""
+        """call_openrouter_stream should yield (chunk, usage) pairs from the API."""
 
-        async def mock_stream(*args: object, **kwargs: object) -> AsyncIterator[str]:
+        async def mock_stream(
+            *args: object, **kwargs: object
+        ) -> AsyncIterator[tuple[str, dict | None]]:
             await asyncio.sleep(0)
             for chunk in ["Hello", " ", "World"]:
-                yield chunk
+                yield chunk, None
+            yield "", {"total_tokens": 42}
 
         with patch(
-            "apps.language.promptic.services.openrouter_client.stream_chat_deltas",
+            "apps.language.promptic.services.openrouter_client."
+            "stream_chat_deltas_with_usage",
             side_effect=mock_stream,
         ):
             chunks = [
@@ -185,20 +189,26 @@ class TestCallOpenrouterStream:
                 async for chunk in call_openrouter_stream(system="sys", user="usr")
             ]
 
-        assert chunks == ["Hello", " ", "World"]
+        assert chunks == [
+            ("Hello", None),
+            (" ", None),
+            ("World", None),
+            ("", {"total_tokens": 42}),
+        ]
 
     async def test_empty_stream_yields_nothing(self) -> None:
         """call_openrouter_stream should handle empty streams gracefully."""
 
         async def mock_empty_stream(
             *args: object, **kwargs: object
-        ) -> AsyncIterator[str]:
+        ) -> AsyncIterator[tuple[str, dict | None]]:
             await asyncio.sleep(0)
             return
             yield  # make it a generator
 
         with patch(
-            "apps.language.promptic.services.openrouter_client.stream_chat_deltas",
+            "apps.language.promptic.services.openrouter_client."
+            "stream_chat_deltas_with_usage",
             side_effect=mock_empty_stream,
         ):
             chunks = [
@@ -226,14 +236,26 @@ class TestInvokeStream:
         task = _task_mock(
             prompt_name="test_prompt",
             input_variables={"text": "hello"},
+            user_id="user_123",
         )
 
-        async def mock_stream(*args: object, **kwargs: object) -> AsyncIterator[str]:
+        async def mock_stream(
+            *args: object, **kwargs: object
+        ) -> AsyncIterator[tuple[str, dict | None]]:
             await asyncio.sleep(0)
-            yield "chunk"
+            yield "chunk", None
 
         with (
             patch("apps.language.promptic.services.Settings") as mock_settings,
+            patch(
+                "apps.language.promptic.services.finance.check_quota",
+                new_callable=AsyncMock,
+                return_value=Decimal(1000),
+            ),
+            patch(
+                "apps.language.promptic.services.finance.meter_cost",
+                new_callable=AsyncMock,
+            ),
             patch(
                 "apps.language.promptic.services.call_openrouter_stream",
                 side_effect=mock_stream,
@@ -245,6 +267,97 @@ class TestInvokeStream:
         assert mock_call.call_args.kwargs["model"] == "openai/gpt-5.6-terra"
         assert mock_call.call_args.kwargs["temperature"] == pytest.approx(0.4)
         assert mock_call.call_args.kwargs["max_tokens"] == 8000
+
+    async def test_insufficient_quota_blocks_streaming_before_any_call(
+        self, tmp_path: Path
+    ) -> None:
+        """
+        Regression: streaming used to skip billing entirely.
+
+        A caller could get free, unmetered LLM usage just by passing
+        stream=true -- the non-streaming path already gates on quota
+        before spending anything; streaming must too.
+        """
+        prompt_file = tmp_path / "test_prompt.yaml"
+        prompt_file.write_text(
+            "model: openai/gpt-5.6-terra\n"
+            "task:\n  system:\n    persona: You are helpful\n  user: '{{ text }}'\n"
+        )
+        task = _task_mock(
+            prompt_name="test_prompt",
+            input_variables={"text": "hello"},
+            user_id="user_123",
+        )
+
+        with (
+            patch("apps.language.promptic.services.Settings") as mock_settings,
+            patch(
+                "apps.language.promptic.services.finance.check_quota",
+                new_callable=AsyncMock,
+                return_value=Decimal(0),
+            ),
+            patch(
+                "apps.language.promptic.services.call_openrouter_stream"
+            ) as mock_call,
+        ):
+            mock_settings.prompts_dir = tmp_path
+            chunks = [chunk async for chunk in invoke_stream(task)]
+
+        assert chunks == []
+        mock_call.assert_not_called()
+        assert task.error == "insufficient_quota"
+        assert task.task_status == TaskStatusEnum.error
+
+    async def test_meters_real_usage_reported_by_the_stream(
+        self, tmp_path: Path
+    ) -> None:
+        """The final chunk's usage, not the pre-flight estimate, is billed."""
+        prompt_file = tmp_path / "test_prompt.yaml"
+        prompt_file.write_text(
+            "model: openai/gpt-5.6-terra\n"
+            "task:\n  system:\n    persona: You are helpful\n  user: '{{ text }}'\n"
+        )
+        task = _task_mock(
+            prompt_name="test_prompt",
+            input_variables={"text": "hello"},
+            user_id="user_123",
+        )
+
+        async def mock_stream(
+            *args: object, **kwargs: object
+        ) -> AsyncIterator[tuple[str, dict | None]]:
+            await asyncio.sleep(0)
+            yield "chunk", None
+            yield "", {"total_tokens": 500}
+
+        with (
+            patch("apps.language.promptic.services.Settings") as mock_settings,
+            patch(
+                "apps.language.promptic.services.finance.check_quota",
+                new_callable=AsyncMock,
+                return_value=Decimal(1000),
+            ),
+            patch(
+                "apps.language.promptic.services.finance.estimate_text_cost",
+                return_value=0.05,
+            ) as mock_estimate,
+            patch(
+                "apps.language.promptic.services.finance.meter_cost",
+                new_callable=AsyncMock,
+            ) as mock_meter,
+            patch(
+                "apps.language.promptic.services.call_openrouter_stream",
+                side_effect=mock_stream,
+            ),
+        ):
+            mock_settings.prompts_dir = tmp_path
+            [chunk async for chunk in invoke_stream(task)]
+
+        final_call = mock_estimate.call_args_list[-1]
+        assert final_call.kwargs["usage"] == {"total_tokens": 500}
+        mock_meter.assert_awaited_once()
+        assert mock_meter.call_args.args[1] == pytest.approx(0.05)
+        assert task.task_status == TaskStatusEnum.completed
 
 
 @pytest.mark.unit

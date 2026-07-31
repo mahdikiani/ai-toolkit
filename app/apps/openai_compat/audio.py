@@ -68,7 +68,7 @@ async def create_speech(body: dict, *, user_id: str) -> Response:
     response_format = body.get("response_format", "mp3")
 
     estimated = _estimate_speech_cost(text)
-    await finance.check_quota(user_id, estimated, raise_exception=True)
+    await finance.check_quota_or_error(user_id, estimated)
 
     try:
         resolve_api_key()
@@ -130,7 +130,7 @@ async def create_transcription(
         )
 
     estimated = finance.estimate_transcribe_cost(minutes=1.0, provider="soniox")
-    await finance.check_quota(user_id, estimated, raise_exception=True)
+    await finance.check_quota_or_error(user_id, estimated)
 
     suffix = Path(filename).suffix or ".wav"
     with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:

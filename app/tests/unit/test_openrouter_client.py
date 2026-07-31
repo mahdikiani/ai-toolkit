@@ -104,10 +104,10 @@ class TestOpenRouterHTTP:
 
     async def test_stream_chat_deltas_yields_content(self) -> None:
         async def fake_iter(*args, **kwargs):
-            yield "hello"
+            yield {"choices": [{"delta": {"content": "hello"}}]}
 
         with patch(
-            "utils.integrations.openrouter._iter_chat_deltas",
+            "utils.integrations.openrouter._iter_chat_chunks",
             side_effect=fake_iter,
         ):
             chunks = [
@@ -115,3 +115,21 @@ class TestOpenRouterHTTP:
             ]
 
         assert chunks == ["hello"]
+
+    async def test_stream_chat_deltas_with_usage_yields_terminal_usage(self) -> None:
+        async def fake_iter(*args, **kwargs):
+            yield {"choices": [{"delta": {"content": "hello"}}]}
+            yield {"choices": [{"delta": {}}], "usage": {"total_tokens": 12}}
+
+        with patch(
+            "utils.integrations.openrouter._iter_chat_chunks",
+            side_effect=fake_iter,
+        ):
+            pairs = [
+                pair
+                async for pair in or_client.stream_chat_deltas_with_usage(
+                    {"model": "m"}
+                )
+            ]
+
+        assert pairs == [("hello", None), ("", {"total_tokens": 12})]

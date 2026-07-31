@@ -31,10 +31,9 @@ from .schemas import (
 from .services import (
     bootstrap_session,
     complete_assistant_message,
-    iter_openrouter_sse_deltas,
+    iter_billed_reply_stream,
     maybe_apply_session_title_if_ready,
     maybe_apply_suggested_thread_title,
-    messages_as_openrouter,
     thread_model,
 )
 
@@ -315,12 +314,9 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
 
             async def sse() -> AsyncIterator[str]:
                 chunks: list[str] = []
-                payload = {
-                    "model": thread_model(thread),
-                    "messages": await messages_as_openrouter(thread),
-                    "temperature": 0.7,
-                }
-                async for delta in iter_openrouter_sse_deltas(payload):
+                async for delta in iter_billed_reply_stream(
+                    thread=thread, user_id=owner_id
+                ):
                     chunks.append(delta)
                     chunk_evt = json.dumps(
                         {"choices": [{"delta": {"content": delta}}]},
@@ -333,7 +329,10 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
                     "user_id": owner_id,
                     "role": "assistant",
                     "content": full.strip(),
-                    "completion_extra": {"model": payload["model"], "streamed": True},
+                    "completion_extra": {
+                        "model": thread_model(thread),
+                        "streamed": True,
+                    },
                 })
                 if after_reply is not None:
                     await after_reply()
@@ -405,12 +404,9 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
 
             async def sse() -> AsyncIterator[str]:
                 chunks: list[str] = []
-                payload = {
-                    "model": thread_model(thread),
-                    "messages": await messages_as_openrouter(thread),
-                    "temperature": 0.7,
-                }
-                async for delta in iter_openrouter_sse_deltas(payload):
+                async for delta in iter_billed_reply_stream(
+                    thread=thread, user_id=owner_id
+                ):
                     chunks.append(delta)
                     chunk_evt = json.dumps(
                         {"choices": [{"delta": {"content": delta}}]},
@@ -423,7 +419,10 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
                     "user_id": owner_id,
                     "role": "assistant",
                     "content": full.strip(),
-                    "completion_extra": {"model": payload["model"], "streamed": True},
+                    "completion_extra": {
+                        "model": thread_model(thread),
+                        "streamed": True,
+                    },
                 })
                 session_after = await maybe_apply_session_title_if_ready(
                     session=session,
@@ -515,12 +514,9 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
 
             async def sse() -> AsyncIterator[str]:
                 chunks: list[str] = []
-                payload = {
-                    "model": thread_model(thread),
-                    "messages": await messages_as_openrouter(thread),
-                    "temperature": 0.7,
-                }
-                async for delta in iter_openrouter_sse_deltas(payload):
+                async for delta in iter_billed_reply_stream(
+                    thread=thread, user_id=owner_id
+                ):
                     chunks.append(delta)
                     chunk_evt = json.dumps(
                         {"choices": [{"delta": {"content": delta}}]},
@@ -533,7 +529,10 @@ class ChatSessionRouter(usso_routes.AbstractTenantUSSORouter):
                     "user_id": owner_id,
                     "role": "assistant",
                     "content": full.strip(),
-                    "completion_extra": {"model": payload["model"], "streamed": True},
+                    "completion_extra": {
+                        "model": thread_model(thread),
+                        "streamed": True,
+                    },
                 })
                 thread_after = await maybe_apply_suggested_thread_title(
                     thread=thread,

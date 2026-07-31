@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from decimal import Decimal
 
 import httpx
+from fastapi_mongo_base.core.exceptions import BaseHTTPException
 from ufaas import exceptions
 
 from server.config import Settings
@@ -248,3 +249,25 @@ async def check_quota(
         )
         raise error
     return quota
+
+
+async def check_quota_or_error(user_id: str, coin: float) -> Decimal:
+    """
+    Pre-flight quota check for direct request/response handlers.
+
+    Raises a clean ``BaseHTTPException`` (402) instead of letting
+    ``InsufficientFundsError`` propagate -- that exception isn't a
+    ``BaseHTTPException``, so it isn't recognized by any registered
+    handler and falls through to the generic 500 handler, which callers
+    (e.g. mirza-bot's CompletionClient) can't tell apart from a real
+    server fault.
+    """
+    try:
+        return await check_quota(user_id, coin, raise_exception=True)
+    except exceptions.InsufficientFundsError as exc:
+        raise BaseHTTPException(
+            status_code=402,
+            error_code="insufficient_quota",
+            detail=exc.detail,
+            message={"en": exc.detail},
+        ) from exc

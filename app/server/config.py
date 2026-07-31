@@ -62,6 +62,8 @@ class Settings(config.Settings):
     default_tts_model: str = os.getenv("DEFAULT_TTS_MODEL", "openai/gpt-4o-mini-tts")
 
     exa_api_key: str | None = os.getenv("EXA_API_KEY")
+    replicate_api_key: str | None = os.getenv("REPLICATE_API_KEY")
+    fal_api_key: str | None = os.getenv("FAL_API_KEY")
 
     ocr_engine: str = os.getenv("OCR_ENGINE", "pipeline")
     ocr_pipeline_dpi: int = int(os.getenv("OCR_PIPELINE_DPI", "300"))

@@ -40,7 +40,7 @@ async def create_generation(body: dict, *, user_id: str) -> JSONResponse:
     response_format = body.get("response_format", "url")
 
     estimated = _estimate_image_cost(body)
-    await finance.check_quota(user_id, estimated, raise_exception=True)
+    await finance.check_quota_or_error(user_id, estimated)
 
     try:
         resolve_api_key()
@@ -98,7 +98,7 @@ async def create_edit(
     response_format = body.get("response_format", "url")
 
     estimated = _estimate_image_cost(body)
-    await finance.check_quota(user_id, estimated, raise_exception=True)
+    await finance.check_quota_or_error(user_id, estimated)
 
     try:
         resolve_api_key()

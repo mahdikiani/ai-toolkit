@@ -109,14 +109,14 @@ async def complete_chat_json(
         raise error from e
 
 
-async def _iter_chat_deltas(
+async def _iter_chat_chunks(
     body: dict,
     *,
     api_key: str | None,
     http_timeout: float,
-) -> AsyncIterator[str]:
-    """Yield deltas from a successful OpenRouter streaming request."""
-    queue: Queue[str | Exception | None] = Queue()
+) -> AsyncIterator[dict]:
+    """Yield parsed JSON chunks from a successful OpenRouter streaming request."""
+    queue: Queue[dict | Exception | None] = Queue()
 
     async def produce() -> None:
         try:
@@ -132,11 +132,17 @@ async def _iter_chat_deltas(
             ):
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
-                    delta = parse_sse_delta_line(line)
-                    if delta == "[DONE]":
+                    line = line.strip()
+                    if not line or line.startswith(":"):
+                        continue
+                    if line.startswith("data: "):
+                        line = line[6:]
+                    if line == "[DONE]":
                         break
-                    if delta:
-                        await queue.put(delta)
+                    try:
+                        await queue.put(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
         except Exception as error:
             await queue.put(error)
         finally:
@@ -161,11 +167,40 @@ async def stream_chat_deltas(
     http_timeout: float = 120.0,
 ) -> AsyncIterator[str]:
     """Stream chat/completions and yield text content deltas."""
+    async for delta, _usage in stream_chat_deltas_with_usage(
+        body, api_key=api_key, http_timeout=http_timeout
+    ):
+        if delta:
+            yield delta
+
+
+async def stream_chat_deltas_with_usage(
+    body: dict,
+    *,
+    api_key: str | None = None,
+    http_timeout: float = 120.0,
+) -> AsyncIterator[tuple[str, dict | None]]:
+    """
+    Stream chat/completions, yielding ``(text_delta, usage)`` per chunk.
+
+    ``usage`` is ``None`` on every chunk except the terminal one, where
+    OpenRouter includes a usage object by default (no ``stream_options``
+    needed) -- callers that need to bill a streamed call for its real
+    reported cost, not an estimate, should keep the last non-None usage
+    seen across the iteration.
+    """
     try:
-        async for delta in _iter_chat_deltas(
+        async for chunk_data in _iter_chat_chunks(
             body, api_key=api_key, http_timeout=http_timeout
         ):
-            yield delta
+            usage = chunk_data.get("usage")
+            usage = usage if isinstance(usage, dict) else None
+            choices = chunk_data.get("choices") or []
+            content = ""
+            if choices:
+                content = (choices[0].get("delta") or {}).get("content") or ""
+            if content or usage:
+                yield content, usage
     except httpx.HTTPStatusError as e:
         error = OpenRouterRequestError(
             f"OpenRouter HTTP {e.response.status_code}: {e.response.text}"

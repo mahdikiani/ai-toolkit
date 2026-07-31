@@ -333,6 +333,73 @@ def thread_model(thread: ChatThread) -> str:
     return thread.chat_model or Settings.default_model
 
 
+def _estimate_reply_cost(msgs: list[dict[str, str]], model: str) -> float:
+    """Rough pre-flight token estimate for a reply to the given thread messages."""
+    return finance.estimate_text_cost(
+        model=model,
+        usage={"total_tokens": max(100, sum(len(m["content"]) for m in msgs) // 4)},
+    )
+
+
+async def iter_billed_reply_stream(
+    *,
+    thread: ChatThread,
+    user_id: str,
+) -> AsyncIterator[str]:
+    """
+    Stream an assistant reply's text deltas, gated and billed.
+
+    Regression: a streamed reply used to be reachable for free -- no
+    quota check, no metering -- just by the caller passing stream=true
+    instead of waiting for a single JSON response.
+    """
+    msgs = await messages_as_openrouter(thread)
+    if not msgs:
+        raise ThreadHasNoMessagesError()
+
+    model = thread_model(thread)
+    payload = {"model": model, "messages": msgs, "temperature": 0.7}
+
+    estimated = _estimate_reply_cost(msgs, model)
+    await finance.check_quota_or_error(user_id, estimated)
+
+    last_usage: dict | None = None
+    try:
+        async for delta, usage in openrouter_client.stream_chat_deltas_with_usage(
+            payload
+        ):
+            if usage is not None:
+                last_usage = usage
+            if delta:
+                yield delta
+    except ValueError:
+        raise OpenRouterNotConfiguredError() from None
+    except RuntimeError as e:
+        raise OpenRouterUpstreamError(str(e)) from e
+    finally:
+        # A billing-recording failure must never discard an
+        # already-streamed reply -- see complete_assistant_message.
+        amount = (
+            finance.estimate_text_cost(model=model, usage=last_usage)
+            if last_usage
+            else estimated
+        )
+        try:
+            await finance.meter_cost(
+                user_id,
+                amount,
+                meta_data={
+                    "service": "chat",
+                    "thread_uid": thread.uid,
+                    "provider_meta": {"model": model, "usage": last_usage},
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to meter chat stream usage for thread %s", thread.uid
+            )
+
+
 async def messages_as_openrouter(thread: ChatThread) -> list[dict[str, str]]:
     """Fetch thread messages formatted for OpenRouter API."""
     rows = await ChatMessage.list_items(
@@ -364,11 +431,8 @@ async def complete_assistant_message(
         "temperature": 0.7,
     }
 
-    estimated = finance.estimate_text_cost(
-        model=model,
-        usage={"total_tokens": max(100, sum(len(m["content"]) for m in msgs) // 4)},
-    )
-    await finance.check_quota(user_id, estimated, raise_exception=True)
+    estimated = _estimate_reply_cost(msgs, model)
+    await finance.check_quota_or_error(user_id, estimated)
 
     try:
         raw_json = await openrouter_client.complete_chat_json(payload)

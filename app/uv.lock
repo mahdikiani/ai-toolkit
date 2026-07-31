@@ -72,7 +72,7 @@ dev = [
 requires-dist = [
     { name = "aiofiles", specifier = ">=25.1.0" },
     { name = "beanie", specifier = ">=2.1.0" },
-    { name = "fastapi-mongo-base", specifier = ">=1.5.7" },
+    { name = "fastapi-mongo-base", specifier = ">=1.8.5" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "latex2mathml", specifier = ">=3.77.0" },
     { name = "opencv-python-headless", specifier = ">=4.10.0" },
@@ -92,7 +92,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.5.0" },
     { name = "soniox-sdk", specifier = ">=0.1.6" },
     { name = "ufaas", specifier = ">=0.5.3" },
-    { name = "usso", specifier = ">=0.31.6" },
+    { name = "usso", specifier = ">=0.31.9" },
     { name = "uvicorn", specifier = ">=0.51.0" },
     { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },
@@ -901,7 +901,7 @@ wheels = [
 
 [[package]]
 name = "fastapi-mongo-base"
-version = "1.5.7"
+version = "1.8.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "beanie" },
@@ -915,9 +915,9 @@ dependencies = [
     { name = "uuid6" },
     { name = "uvicorn", extra = ["standard"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/3a/705b8d494e8b0990d9488c96162882a3ebe966b9f414caf0f0d32bab2add/fastapi_mongo_base-1.5.7.tar.gz", hash = "sha256:c73a40c2ffeb13670c8645f5dce02035cf511db31af8093cefe16035f3437ba0", size = 90250, upload-time = "2026-07-12T06:50:19.123Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/64/24ebd3a3e3fede09c9987887f962bddf6778005a70c5426c8e7f31c3839b/fastapi_mongo_base-1.8.5.tar.gz", hash = "sha256:8f2d15420b8cf86b0173890d43bf08e769ff457d2b4a9003657b258d7fe6008e", size = 112362, upload-time = "2026-07-31T16:59:00.467Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/12/ab68b62c2bcd8f44a86d6c5eb0ba4f4b966203739b92abceb40e4d50cdb5/fastapi_mongo_base-1.5.7-py3-none-any.whl", hash = "sha256:60571fe6ff2b627199f10ffbacdd7db71f3a0909c9d0841f26047aaa979d9fa7", size = 66299, upload-time = "2026-07-12T06:50:17.86Z" },
+    { url = "https://files.pythonhosted.org/packages/37/f7/4852d87d33c9af6057424b4468d66af0c40ab93990beee41de742a3085da/fastapi_mongo_base-1.8.5-py3-none-any.whl", hash = "sha256:ea40783f61c17a2b6dd7146153f02c98374a4707a9c5513e75a14ee44bfa7131", size = 83865, upload-time = "2026-07-31T16:58:59.02Z" },
 ]
 
 [[package]]
@@ -3653,7 +3653,7 @@ wheels = [
 
 [[package]]
 name = "usso"
-version = "0.31.6"
+version = "0.31.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiocache" },
@@ -3665,9 +3665,9 @@ dependencies = [
     { name = "singleton-package" },
     { name = "usso-jwt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/55/3c/fb2949c1bf128990908dfc5345992703f9e7d2c0979983af25a1b20b053f/usso-0.31.6.tar.gz", hash = "sha256:df2fd793773cd94affd9f4add445e7bdbff3956d269723c116774e6d04a364f5", size = 36972, upload-time = "2026-07-10T11:50:38.923Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/c9/ff296e5db1c7336e25d1f1bdb69d438d4fe0a5669b543cef557b485b133c/usso-0.31.9.tar.gz", hash = "sha256:4c07cb76ba2086347fb6b63340cd8c6da2b184be1cce604984cb2884e3cb5a7c", size = 41119, upload-time = "2026-07-31T16:47:51.167Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/06/3f68ecd2515a5b283e884d339e4688a750aa3fc4306b45108dc4f341d9f6/usso-0.31.6-py3-none-any.whl", hash = "sha256:d6d11d78671c46e05fb8d8d9b2d8249bf7b7e27cc5696005456df32428728f54", size = 40736, upload-time = "2026-07-10T11:50:37.908Z" },
+    { url = "https://files.pythonhosted.org/packages/90/a1/6434c81fa7e784c29869c759afdf0ffb490e8d59f51e515a02b61bfe6028/usso-0.31.9-py3-none-any.whl", hash = "sha256:d12491493b7cad25e9bf1c762bd890cd7d7280d8acbb8276f36663ed076a2e26", size = 43604, upload-time = "2026-07-31T16:47:49.902Z" },
 ]
 
 [[package]]

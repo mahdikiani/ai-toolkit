@@ -10,7 +10,6 @@ services:
     networks:
       - traefik-net
       - mongo-net
-      - gateway-net
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.${PROJECT_NAME}.entrypoints=web"
@@ -26,6 +25,4 @@ networks:
   traefik-net:
     external: true
   mongo-net:
-    external: true
-  gateway-net:
     external: true

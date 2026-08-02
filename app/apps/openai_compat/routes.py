@@ -10,6 +10,7 @@ from fastapi.responses import Response
 from usso import UserData
 
 from server.config import Settings
+from utils.auth import resolve_on_behalf_ids
 from utils.usso import get_usso
 
 from . import audio as audio_api
@@ -92,6 +93,13 @@ async def chat_completions(
 
     user_id = getattr(user, "uid", None) or getattr(user, "user_id", "")
     workspace_id = getattr(user, "workspace_id", None)
+    user_id, workspace_id = resolve_on_behalf_ids(
+        request,
+        user_id,
+        workspace_id,
+        override_user_id=body.get("user_id"),
+        override_workspace_id=body.get("workspace_id"),
+    )
 
     if stream:
         return await services.handle_stream_chat(
@@ -121,6 +129,13 @@ async def audio_speech(
         )
     user_id = getattr(user, "uid", None) or getattr(user, "user_id", "")
     workspace_id = getattr(user, "workspace_id", None)
+    user_id, workspace_id = resolve_on_behalf_ids(
+        request,
+        user_id,
+        workspace_id,
+        override_user_id=body.get("user_id"),
+        override_workspace_id=body.get("workspace_id"),
+    )
     return await audio_api.create_speech(
         body, user_id=user_id, workspace_id=workspace_id
     )
@@ -128,15 +143,25 @@ async def audio_speech(
 
 @router.post("/audio/transcriptions")
 async def audio_transcriptions(
+    request: Request,
     user: UserData = Depends(auth),
     file: UploadFile = File(...),
     model: str | None = Form(None),
     language: str | None = Form(None),
     response_format: str = Form("json"),
+    on_behalf_user_id: str | None = Form(None, alias="user_id"),
+    on_behalf_workspace_id: str | None = Form(None, alias="workspace_id"),
 ) -> dict:
     """OpenAI-compatible transcriptions backed by Soniox."""
     user_id = getattr(user, "uid", None) or getattr(user, "user_id", "")
     workspace_id = getattr(user, "workspace_id", None)
+    user_id, workspace_id = resolve_on_behalf_ids(
+        request,
+        user_id,
+        workspace_id,
+        override_user_id=on_behalf_user_id,
+        override_workspace_id=on_behalf_workspace_id,
+    )
     content = await file.read()
     filename = file.filename or "audio.wav"
     return await audio_api.create_transcription(
@@ -168,6 +193,13 @@ async def image_generations(
         )
     user_id = getattr(user, "uid", None) or getattr(user, "user_id", "")
     workspace_id = getattr(user, "workspace_id", None)
+    user_id, workspace_id = resolve_on_behalf_ids(
+        request,
+        user_id,
+        workspace_id,
+        override_user_id=body.get("user_id"),
+        override_workspace_id=body.get("workspace_id"),
+    )
     return await images_api.create_generation(
         body, user_id=user_id, workspace_id=workspace_id
     )
@@ -175,6 +207,7 @@ async def image_generations(
 
 @router.post("/images/edits")
 async def image_edits(
+    request: Request,
     user: UserData = Depends(auth),
     file: UploadFile = File(...),
     prompt: str = Form(...),
@@ -183,10 +216,19 @@ async def image_edits(
     n: int = Form(1),
     size: str = Form("1024x1024"),
     response_format: str = Form("url"),
+    on_behalf_user_id: str | None = Form(None, alias="user_id"),
+    on_behalf_workspace_id: str | None = Form(None, alias="workspace_id"),
 ) -> object:
     """OpenAI-compatible image edits via OpenRouter."""
     user_id = getattr(user, "uid", None) or getattr(user, "user_id", "")
     workspace_id = getattr(user, "workspace_id", None)
+    user_id, workspace_id = resolve_on_behalf_ids(
+        request,
+        user_id,
+        workspace_id,
+        override_user_id=on_behalf_user_id,
+        override_workspace_id=on_behalf_workspace_id,
+    )
     image_bytes = await file.read()
     mask_bytes = await mask.read() if mask else None
     body = {

@@ -135,6 +135,7 @@ class TestPass3UtilsAndRoutes:
         }
 
         req = MagicMock()
+        req.headers = {}
         req.json = AsyncMock(
             return_value={"messages": [{"role": "user", "content": "h"}]}
         )
@@ -195,7 +196,7 @@ class TestPass3UtilsAndRoutes:
             "apps.openai_compat.routes.audio_api.create_transcription",
             AsyncMock(return_value={"text": "hi"}),
         ):
-            assert await oc.audio_transcriptions(user, upload) == {"text": "hi"}
+            assert await oc.audio_transcriptions(req, user, upload) == {"text": "hi"}
 
     @pytest.mark.asyncio
     async def test_audio_transcription_and_elements(self, tmp_path: Path) -> None:

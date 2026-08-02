@@ -43,6 +43,28 @@ def is_service_request(request: object) -> bool:
     return bool(request.headers.get("x-api-key"))
 
 
+def resolve_on_behalf_ids(
+    request: object,
+    user_id: str,
+    workspace_id: str | None,
+    *,
+    override_user_id: str | None,
+    override_workspace_id: str | None,
+) -> tuple[str, str | None]:
+    """
+    Let a service (API-key) caller act on behalf of a specific end user.
+
+    Without this, every request through a shared API key (e.g. mirza-bot,
+    acting for many Telegram users through one key) bills and checks quota
+    against the key's own identity instead of the actual end user, no
+    matter who's asking. JWT end-users can never override this: always
+    billed/limited as themselves, never a client-claimed identity.
+    """
+    if not is_service_request(request):
+        return user_id, workspace_id
+    return override_user_id or user_id, override_workspace_id or workspace_id
+
+
 def _resolve_workspace_id_on_behalf(
     request: object, user: object, data: object
 ) -> None:

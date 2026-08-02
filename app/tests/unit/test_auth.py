@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from utils.auth import authorize_create_on_behalf, is_service_request
+from utils.auth import (
+    authorize_create_on_behalf,
+    is_service_request,
+    resolve_on_behalf_ids,
+)
 
 
 class DummyRequest:
@@ -227,3 +231,55 @@ async def test_authorize_create_on_behalf_jwt_user_gets_own_workspace_when_unset
     await authorize_create_on_behalf(router, DummyRequest(), user, data)
 
     assert data.workspace_id == "real-ws"
+
+
+def test_resolve_on_behalf_ids_service_request_honors_override() -> None:
+    """
+    A service (API-key) caller acting for a specific end user gets that
+    user's id/workspace, not the key's own -- e.g. mirza-bot billing the
+    actual Telegram user instead of its own shared service-key identity.
+    """
+    request = DummyRequest(headers={"x-api-key": "uak-test"})
+
+    user_id, workspace_id = resolve_on_behalf_ids(
+        request,
+        "service-key-uid",
+        "service-key-ws",
+        override_user_id="telegram-user-1",
+        override_workspace_id="telegram-user-1-ws",
+    )
+
+    assert user_id == "telegram-user-1"
+    assert workspace_id == "telegram-user-1-ws"
+
+
+def test_resolve_on_behalf_ids_service_request_falls_back_without_override() -> None:
+    """A service request with no explicit override keeps the key's own id."""
+    request = DummyRequest(headers={"x-api-key": "uak-test"})
+
+    user_id, workspace_id = resolve_on_behalf_ids(
+        request,
+        "service-key-uid",
+        "service-key-ws",
+        override_user_id=None,
+        override_workspace_id=None,
+    )
+
+    assert user_id == "service-key-uid"
+    assert workspace_id == "service-key-ws"
+
+
+def test_resolve_on_behalf_ids_jwt_user_cannot_override() -> None:
+    """A JWT end-user can never claim a different id via the request body."""
+    request = DummyRequest()
+
+    user_id, workspace_id = resolve_on_behalf_ids(
+        request,
+        "real-user",
+        "real-ws",
+        override_user_id="attacker-uid",
+        override_workspace_id="attacker-ws",
+    )
+
+    assert user_id == "real-user"
+    assert workspace_id == "real-ws"

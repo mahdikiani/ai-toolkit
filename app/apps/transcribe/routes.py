@@ -13,6 +13,7 @@ from fastapi import (
     WebSocket,
 )
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
+from fastapi_mongo_base.errors.status import NotFoundError
 from fastapi_mongo_base.routes import PaginatedResponse
 from pydantic import BaseModel
 from soniox.types import TranscriptionWebhook
@@ -31,6 +32,22 @@ from .schemas import (
     TranscribeTaskUploadFormSchema,
 )
 from .webhook_auth import verify_webhook_request
+
+
+async def _get_task_for_webhook(uid: str) -> TranscribeTask:
+    """
+    Fetch a task for an already-token-verified webhook callback.
+
+    Soniox's callback has no USSO session and so no tenant_id -- unlike
+    self.get_item(), which requires one unconditionally now (fastapi-
+    mongo-base >=1.6). verify_webhook_request() already authenticates the
+    caller via a per-task token, so a plain uid lookup is correct and
+    sufficient here; tenant scoping would just be redundant.
+    """
+    item = await TranscribeTask.find_one({"uid": uid, "is_deleted": False})
+    if item is None:
+        raise NotFoundError()
+    return item
 
 
 class TranscribeRouter(AbstractTaskUSSORouter):
@@ -173,9 +190,7 @@ class TranscribeRouter(AbstractTaskUSSORouter):
     ) -> dict:
         """Handle transcription completion webhook (Soniox)."""
         verify_webhook_request(uid=uid, token=token)
-        item: TranscribeTask = await self.get_item(
-            uid, user_id=None, ignore_user_id=True
-        )
+        item: TranscribeTask = await _get_task_for_webhook(uid)
         if status == "error":
             background_tasks.add_task(services.process_error_webhook, item)
             return {"message": "Error"}
@@ -200,9 +215,7 @@ class TranscribeRouter(AbstractTaskUSSORouter):
     ) -> dict:
         """Handle chunk transcription webhook."""
         verify_webhook_request(uid=uid, token=token)
-        item: TranscribeTask = await self.get_item(
-            uid, user_id=None, ignore_user_id=True
-        )
+        item: TranscribeTask = await _get_task_for_webhook(uid)
         if status == "error":
             background_tasks.add_task(services.process_error_webhook, item)
             return {"message": "Error"}

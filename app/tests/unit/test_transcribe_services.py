@@ -941,3 +941,49 @@ class TestTranscribeAudioDurationMetaData:
         task = _transcribe_task(meta_data={"audio_duration_ms": 55000})
 
         assert task.audio_duration == pytest.approx(55.0)
+
+
+@pytest.mark.unit
+class TestGetTaskForWebhook:
+    """
+    Regression: live bug -- a real voice message got stuck in processing.
+
+    fastapi-mongo-base's TenantUserEntity.get_item() started unconditionally
+    requiring tenant_id. Soniox's webhook callback has no USSO session and
+    so no tenant_id, but was calling self.get_item() (the tenant-scoped
+    wrapper), raising ValueError on every single callback -- so no
+    transcription ever completed. _get_task_for_webhook() bypasses the
+    tenant-scoped lookup entirely; verify_webhook_request() already
+    authenticates the caller via a per-task token, so tenant scoping would
+    just be redundant here.
+    """
+
+    async def test_finds_task_with_no_tenant_context(self) -> None:
+        from apps.transcribe.routes import _get_task_for_webhook
+
+        found_task = MagicMock()
+        with patch(
+            "apps.transcribe.routes.TranscribeTask.find_one",
+            AsyncMock(return_value=found_task),
+        ) as mock_find_one:
+            result = await _get_task_for_webhook("task_123")
+
+        assert result is found_task
+        mock_find_one.assert_awaited_once_with({
+            "uid": "task_123",
+            "is_deleted": False,
+        })
+
+    async def test_raises_not_found_for_missing_task(self) -> None:
+        from fastapi_mongo_base.errors.status import NotFoundError
+
+        from apps.transcribe.routes import _get_task_for_webhook
+
+        with (
+            patch(
+                "apps.transcribe.routes.TranscribeTask.find_one",
+                AsyncMock(return_value=None),
+            ),
+            pytest.raises(NotFoundError),
+        ):
+            await _get_task_for_webhook("missing-task")

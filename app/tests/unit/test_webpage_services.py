@@ -56,7 +56,7 @@ class TestProcessWebpage:
     async def test_saves_extracted_content(self) -> None:
         """Mark the task complete when Jina Reader returns page content."""
         task = _task()
-        response = MagicMock(text="# Extracted content")
+        response = MagicMock(text="Title: Useful article\n\n# Extracted content")
         response.raise_for_status = MagicMock()
 
         with patch("httpx.AsyncClient", return_value=_client(response)):
@@ -64,10 +64,11 @@ class TestProcessWebpage:
 
         assert result is task
         assert task.task_status == TaskStatusEnum.completed
-        assert task.result == "# Extracted content"
+        assert task.result == "Title: Useful article\n\n# Extracted content"
         assert task.provider_meta == {
             "provider": "jina-reader",
             "url": task.url,
+            "title": "Useful article",
             "usage": {"amount": 1.2},
         }
         assert task.usage_amount == pytest.approx(1.2)

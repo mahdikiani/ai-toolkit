@@ -1,6 +1,8 @@
 """Webpage extraction services using Jina Reader."""
 
 import logging
+import re
+from urllib.parse import urlparse
 
 import httpx
 from fastapi_mongo_base.tasks import TaskStatusEnum
@@ -12,6 +14,17 @@ from .models import WebpageTask
 logger = logging.getLogger(__name__)
 
 JINA_READER_BASE = "https://r.jina.ai/"
+_TITLE_RE = re.compile(r"^Title:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
+
+
+def _page_title(content: str, url: str) -> str:
+    """Return Jina's page title, with a stable URL-derived fallback."""
+    match = _TITLE_RE.search(content)
+    if match and (title := match.group(1).strip()):
+        return title
+    parsed = urlparse(url)
+    path_name = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    return path_name.replace("-", " ").replace("_", " ").strip() or parsed.netloc
 
 
 async def process_webpage(task: WebpageTask) -> WebpageTask:
@@ -72,6 +85,7 @@ async def process_webpage(task: WebpageTask) -> WebpageTask:
     task.provider_meta = {
         "provider": "jina-reader",
         "url": task.url,
+        "title": _page_title(content, task.url),
         "usage": {"amount": amount},
     }
     await task.save_report("Task processed successfully")

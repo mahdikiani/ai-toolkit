@@ -240,6 +240,23 @@ class TestArchiveUtilsExtended:
 
 @pytest.mark.unit
 class TestYoutubeServices:
+    async def test_youtube_oembed_title(self) -> None:
+        response = MagicMock()
+        response.json.return_value = {"title": "Resolved title"}
+        response.raise_for_status = MagicMock()
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        client.__aexit__.return_value = None
+        client.get = AsyncMock(return_value=response)
+
+        with patch(
+            "apps.youtube.services.httpx.AsyncClient", return_value=client
+        ):
+            title = await youtube_services._youtube_oembed_title("abc123")
+
+        assert title == "Resolved title"
+        assert client.get.await_args.kwargs["params"]["format"] == "json"
+
     async def test_process_youtube_missing_api_key(self) -> None:
         task = MagicMock()
         task.video_id = "abc123"
@@ -263,7 +280,12 @@ class TestYoutubeServices:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = [
-            {"tracks": [{"transcript": [{"text": "hello"}, {"text": "world"}]}]}
+            {
+                "title": "A useful video title",
+                "tracks": [
+                    {"transcript": [{"text": "hello"}, {"text": "world"}]}
+                ],
+            }
         ]
         mock_response.raise_for_status = MagicMock()
 
@@ -296,6 +318,9 @@ class TestYoutubeServices:
         task.update_and_emit.assert_awaited()
         assert (
             task.update_and_emit.await_args.kwargs["task_status"].value == "completed"
+        )
+        assert task.update_and_emit.await_args.kwargs["provider_meta"]["title"] == (
+            "A useful video title"
         )
 
     async def test_process_youtube_insufficient_quota_skips_the_request(self) -> None:
@@ -343,7 +368,12 @@ class TestYoutubeServices:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = [
-            {"tracks": [{"transcript": [{"text": "hello"}, {"text": "world"}]}]}
+            {
+                "title": "A useful video title",
+                "tracks": [
+                    {"transcript": [{"text": "hello"}, {"text": "world"}]}
+                ],
+            }
         ]
         mock_response.raise_for_status = MagicMock()
 

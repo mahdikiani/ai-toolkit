@@ -24,11 +24,7 @@ logger = logging.getLogger(__name__)
 
 def _estimate_speech_cost(text: str) -> float:
     """Estimate TTS cost from character count."""
-    pricing = finance.pricing_config().get("speech") or {}
-    per_1k = float(pricing.get("default_per_1k_chars", 0.5))
-    markup = float(pricing.get("markup", 1.0))
-    chars = max(1, len(text))
-    return (chars / 1000) * per_1k * markup
+    return finance.estimate_speech_cost(chars=len(text))
 
 
 def _language_hints(language: str | None) -> list:

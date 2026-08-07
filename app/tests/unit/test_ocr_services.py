@@ -396,7 +396,7 @@ class TestOcrQuotaAndErrorHandling:
             patch(
                 "apps.ocr.services.finance.meter_cost",
                 new_callable=AsyncMock,
-                return_value=MagicMock(amount=3.0, uid="usage_456"),
+                return_value=MagicMock(amount=3.6, uid="usage_456"),
             ) as mock_meter_cost,
             patch("apps.ocr.services.Settings") as mock_settings,
         ):
@@ -406,13 +406,18 @@ class TestOcrQuotaAndErrorHandling:
         # Verify metering was called with correct parameters
         mock_meter_cost.assert_called_once_with(
             "user_123",
-            3.0,
-            meta_data={"service": "ocr", "engine": "llm", "pages": 3},
+            pytest.approx(3.6),
+            meta_data={
+                "service": "ocr",
+                "engine": "llm",
+                "pages": 3,
+                "task_uid": "task_123",
+            },
             workspace_id=None,
         )
 
         # Verify usage info was saved to task
-        assert result.usage_amount == pytest.approx(3.0)
+        assert result.usage_amount == pytest.approx(3.6)
         assert result.usage_id == "usage_456"
 
     async def test_error_on_unsupported_file_type(self) -> None:

@@ -17,14 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 def _estimate_image_cost(body: dict) -> float:
-    n = int(body.get("n", 1))
-    pricing = finance.pricing_config().get("image") or {}
-    per_image = float(pricing.get("default_per_image", 1.0))
-    markup = float(pricing.get("markup", 1.0))
-    model_cfg = pricing.get("models", {}).get(body.get("model", ""), {})
-    if isinstance(model_cfg, dict):
-        per_image = float(model_cfg.get("per_image", per_image))
-    return n * per_image * markup
+    return finance.estimate_image_cost(
+        count=max(1, int(body.get("n", 1))),
+        model=body.get("model"),
+    )
 
 
 async def create_generation(

@@ -138,6 +138,7 @@ async def process_youtube(task: YoutubeTranscriptTask) -> YoutubeTranscriptTask:
                 "service": "youtube",
                 "provider": "youtube-transcript.io",
                 "video_id": task.video_id,
+                "task_uid": task.uid,
             },
             workspace_id=task.workspace_id,
         )

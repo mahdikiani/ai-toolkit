@@ -5,6 +5,8 @@ import logging
 import httpx
 from fastapi_mongo_base.tasks import TaskStatusEnum
 
+from utils.billing import finance
+
 from .models import WebpageTask
 
 logger = logging.getLogger(__name__)
@@ -14,6 +16,18 @@ JINA_READER_BASE = "https://r.jina.ai/"
 
 async def process_webpage(task: WebpageTask) -> WebpageTask:
     """Fetch readable page content via Jina Reader and save the result."""
+    amount = finance.estimate_fixed_cost("webpage", "per_request")
+    quota = await finance.check_quota(
+        task.user_id,
+        amount,
+        raise_exception=False,
+        workspace_id=task.workspace_id,
+    )
+    if quota < amount:
+        task.task_status = TaskStatusEnum.error
+        await task.save_report("insufficient_quota")
+        return task
+
     reader_url = f"{JINA_READER_BASE}{task.url}"
     try:
         async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
@@ -39,6 +53,26 @@ async def process_webpage(task: WebpageTask) -> WebpageTask:
 
     task.task_status = TaskStatusEnum.completed
     task.result = content
-    task.provider_meta = {"provider": "jina-reader", "url": task.url}
+    usage = None
+    try:
+        usage = await finance.meter_cost(
+            task.user_id,
+            amount,
+            meta_data={
+                "service": "webpage",
+                "provider": "jina-reader",
+                "task_uid": task.uid,
+            },
+            workspace_id=task.workspace_id,
+        )
+    except Exception:
+        logger.exception("Failed to meter webpage usage for task %s", task.uid)
+    task.usage_amount = float(usage.amount) if usage else amount
+    task.usage_id = usage.uid if usage else None
+    task.provider_meta = {
+        "provider": "jina-reader",
+        "url": task.url,
+        "usage": {"amount": amount},
+    }
     await task.save_report("Task processed successfully")
     return task

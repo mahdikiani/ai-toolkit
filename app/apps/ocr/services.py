@@ -44,7 +44,7 @@ async def _meter_usage(
         return await finance.meter_cost(
             task.user_id,
             amount,
-            meta_data=meta_data,
+            meta_data={**meta_data, "task_uid": task.uid},
             workspace_id=task.workspace_id,
         )
     except Exception:

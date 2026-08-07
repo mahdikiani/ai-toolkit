@@ -263,6 +263,7 @@ async def _process_chunked_transcribe(
                 "service": "transcribe",
                 "provider": _task_provider(task),
                 "chunks": len(ordered_results),
+                "task_uid": task.uid,
             },
             workspace_id=task.workspace_id,
         )
@@ -455,6 +456,7 @@ async def process_transcription_webhook(
                 "model": task.model,
                 "job_id": task.transcription_job_id,
                 "audio_duration_ms": job_result.audio_duration_ms,
+                "task_uid": task.uid,
             },
             workspace_id=task.workspace_id,
         )

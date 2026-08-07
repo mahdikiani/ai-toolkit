@@ -360,6 +360,7 @@ async def invoke_stream(task: "PrompticTask") -> AsyncIterator[str]:
                     "service": "promptic",
                     "prompt": task.prompt_name,
                     "provider_meta": {"model": model, "usage": last_usage},
+                    "task_uid": task.uid,
                 },
                 workspace_id=task.workspace_id,
             )
@@ -468,6 +469,7 @@ async def process_promptic(
                     "service": "promptic",
                     "prompt": task.prompt_name,
                     "provider_meta": provider_meta,
+                    "task_uid": task.uid,
                 },
                 workspace_id=task.workspace_id,
             )

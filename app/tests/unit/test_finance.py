@@ -3,6 +3,7 @@
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from ufaas import exceptions
 
@@ -295,6 +296,68 @@ class TestMeterCost:
         sent_body = mock_client.post.call_args.kwargs["json"]
         assert sent_body["workspace_id"] == "workspace_1"
 
+    async def test_derives_idempotency_key_from_task_metadata(self) -> None:
+        from utils.billing.finance import meter_cost
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"uid": "usage_123", "amount": "5.0"}
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with (
+            patch("utils.billing.finance.Settings") as mock_settings,
+            patch("utils.billing.finance.get_ufaas_client") as mock_get_client,
+            patch("utils.billing.finance.UsageSchema") as mock_schema,
+        ):
+            mock_settings.finance_api_key = "test_key"
+            mock_get_client.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_get_client.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_schema.model_validate.return_value = MagicMock()
+
+            await meter_cost(
+                "user_123",
+                5.0,
+                meta_data={"service": "ocr", "task_uid": "task-1"},
+            )
+
+        sent_body = mock_client.post.call_args.kwargs["json"]
+        assert sent_body["idempotency_key"] == "ai-toolkit:ocr:task-1"
+
+    async def test_retries_task_usage_safely_with_idempotency_key(self) -> None:
+        from utils.billing.finance import meter_cost
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"uid": "usage_123", "amount": "5.0"}
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(
+            side_effect=[httpx.ReadTimeout("lost response"), mock_response]
+        )
+
+        with (
+            patch("utils.billing.finance.Settings") as mock_settings,
+            patch("utils.billing.finance.get_ufaas_client") as mock_get_client,
+            patch("utils.billing.finance.UsageSchema") as mock_schema,
+            patch("utils.billing.finance.asyncio.sleep", AsyncMock()),
+        ):
+            mock_settings.finance_api_key = "test_key"
+            mock_get_client.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_get_client.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_schema.model_validate.return_value = MagicMock(uid="usage_123")
+
+            await meter_cost(
+                "user_123",
+                5.0,
+                meta_data={"service": "ocr", "task_uid": "task-1"},
+            )
+
+        assert mock_client.post.await_count == 2
+
 
 @pytest.mark.unit
 class TestInsufficientFundsError:
@@ -450,6 +513,19 @@ class TestEstimateOcrCost:
 
         assert result == pytest.approx(6.0)
 
+    def test_applies_ocr_markup(self) -> None:
+        from utils.billing.finance import estimate_ocr_cost
+
+        with patch(
+            "utils.billing.finance.pricing_config",
+            return_value={
+                "ocr": {"markup": 1.2, "default_per_page": 5.0, "engines": {}}
+            },
+        ):
+            result = estimate_ocr_cost(pages=2)
+
+        assert result == pytest.approx(12.0)
+
 
 @pytest.mark.unit
 class TestEstimateTranscribeCost:
@@ -478,6 +554,60 @@ class TestEstimateTranscribeCost:
             result = estimate_transcribe_cost(minutes=3.0, provider="custom")
 
         assert result == pytest.approx(6.0)
+
+    def test_applies_transcribe_markup(self) -> None:
+        from utils.billing.finance import estimate_transcribe_cost
+
+        with patch(
+            "utils.billing.finance.pricing_config",
+            return_value={
+                "transcribe": {
+                    "markup": 1.2,
+                    "providers": {"soniox": {"per_minute": 2.0}},
+                }
+            },
+        ):
+            result = estimate_transcribe_cost(minutes=3.0)
+
+        assert result == pytest.approx(7.2)
+
+
+@pytest.mark.unit
+class TestOtherCostEstimators:
+    def test_fixed_cost_applies_markup(self) -> None:
+        from utils.billing.finance import estimate_fixed_cost
+
+        with patch(
+            "utils.billing.finance.pricing_config",
+            return_value={"webpage": {"per_request": 2.0, "markup": 1.2}},
+        ):
+            assert estimate_fixed_cost("webpage", "per_request") == pytest.approx(2.4)
+
+    def test_speech_cost_applies_markup(self) -> None:
+        from utils.billing.finance import estimate_speech_cost
+
+        with patch(
+            "utils.billing.finance.pricing_config",
+            return_value={
+                "speech": {"default_per_1k_chars": 2.0, "markup": 1.2}
+            },
+        ):
+            assert estimate_speech_cost(chars=1000) == pytest.approx(2.4)
+
+    def test_image_cost_applies_model_price_and_markup(self) -> None:
+        from utils.billing.finance import estimate_image_cost
+
+        with patch(
+            "utils.billing.finance.pricing_config",
+            return_value={
+                "image": {
+                    "default_per_image": 1.0,
+                    "markup": 1.2,
+                    "models": {"model-a": {"per_image": 3.0}},
+                }
+            },
+        ):
+            assert estimate_image_cost(count=2, model="model-a") == pytest.approx(7.2)
 
 
 @pytest.mark.unit

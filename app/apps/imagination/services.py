@@ -125,19 +125,24 @@ async def process_imagination(task: ImaginationTask) -> ImaginationTask:
     task.result_url = result_url
     task.result_b64 = result_b64
 
+    usage = None
     try:
-        await finance.meter_cost(
+        usage = await finance.meter_cost(
             task.user_id,
             estimated,
             meta_data={
                 "service": "imagination",
                 "model": task.model or "openai/dall-e-3",
                 "enhanced": task.enhance_prompt,
+                "task_uid": task.uid,
             },
             workspace_id=task.workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter imagination usage")
+
+    task.usage_amount = float(usage.amount) if usage else estimated
+    task.usage_id = usage.uid if usage else None
 
     task.task_status = TaskStatusEnum.completed
     await task.save_report("Image generated successfully")
@@ -145,10 +150,4 @@ async def process_imagination(task: ImaginationTask) -> ImaginationTask:
 
 
 def _estimate_imagination_cost(task: ImaginationTask) -> float:
-    pricing = finance.pricing_config().get("image") or {}
-    per_image = float(pricing.get("default_per_image", 1.0))
-    markup = float(pricing.get("markup", 1.0))
-    model_cfg = pricing.get("models", {}).get(task.model or "", {})
-    if isinstance(model_cfg, dict):
-        per_image = float(model_cfg.get("per_image", per_image))
-    return per_image * markup
+    return finance.estimate_image_cost(model=task.model)

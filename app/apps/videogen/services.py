@@ -68,8 +68,7 @@ async def process_video(task: VideoGenTask) -> VideoGenTask:
     """Generate a video via the configured provider, gated and billed per video."""
     provider = getattr(task, "provider", "openrouter") or "openrouter"
 
-    pricing = finance.pricing_config().get("video") or {}
-    amount = float(pricing.get("default_per_video", 1.0))
+    amount = finance.estimate_fixed_cost("video", "default_per_video")
     quota = await finance.check_quota(
         task.user_id, amount, raise_exception=False, workspace_id=task.workspace_id
     )
@@ -96,19 +95,24 @@ async def process_video(task: VideoGenTask) -> VideoGenTask:
 
     task.result_url = video_url
 
+    usage = None
     try:
-        await finance.meter_cost(
+        usage = await finance.meter_cost(
             task.user_id,
             amount,
             meta_data={
                 "service": "videogen",
                 "provider": provider,
                 "model": task.model,
+                "task_uid": task.uid,
             },
             workspace_id=task.workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter video generation usage")
+
+    task.usage_amount = float(usage.amount) if usage else amount
+    task.usage_id = usage.uid if usage else None
 
     task.task_status = TaskStatusEnum.completed
     await task.save_report("Video generated successfully")

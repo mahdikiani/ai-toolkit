@@ -1,5 +1,6 @@
 """Financial utilities for quota management and configurable usage metering."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from decimal import Decimal
@@ -13,6 +14,7 @@ from server.config import Settings
 from .saas import QuotaSchema, UsageCreateSchema, UsageSchema
 
 resource_variant = getattr(Settings, "UFAAS_RESOURCE_VARIANT", "")
+DEFAULT_MARKUP = 1.2
 
 
 def _insufficient_funds_error(message: str) -> exceptions.InsufficientFundsError:
@@ -37,41 +39,48 @@ PricingConfig = dict[str, PricingSection]
 
 DEFAULT_PRICING: PricingConfig = {
     "text": {
-        "markup": 1.0,
+        "markup": DEFAULT_MARKUP,
         "default_per_1k_tokens": 1.0,
         "models": {},
     },
     "speech": {
-        "markup": 1.0,
+        "markup": DEFAULT_MARKUP,
         "default_per_1k_chars": 0.5,
     },
     "ocr": {
+        "markup": DEFAULT_MARKUP,
         "default_per_page": 1.0,
         "engines": {},
     },
     "transcribe": {
+        "markup": DEFAULT_MARKUP,
         "providers": {
             "soniox": {"per_minute": 1.0},
         },
     },
     "youtube": {
+        "markup": DEFAULT_MARKUP,
+        "per_request": 1.0,
+    },
+    "webpage": {
+        "markup": DEFAULT_MARKUP,
         "per_request": 1.0,
     },
     "image": {
-        "markup": 1.0,
+        "markup": DEFAULT_MARKUP,
         "default_per_image": 1.0,
         "models": {},
     },
     "web_search": {
-        "markup": 1.0,
+        "markup": DEFAULT_MARKUP,
         "default_per_search": 1.0,
     },
     "video": {
-        "markup": 1.0,
+        "markup": DEFAULT_MARKUP,
         "default_per_video": 1.0,
     },
     "voice_morph": {
-        "markup": 1.0,
+        "markup": DEFAULT_MARKUP,
         "default_per_request": 1.0,
     },
 }
@@ -93,7 +102,14 @@ def pricing_config() -> PricingConfig:
             for key, value in configured.items()
             if isinstance(key, str)
         }
-        return {**DEFAULT_PRICING, **configured_sections}
+        return {
+            key: {**default_section, **configured_sections.get(key, {})}
+            for key, default_section in DEFAULT_PRICING.items()
+        } | {
+            key: section
+            for key, section in configured_sections.items()
+            if key not in DEFAULT_PRICING
+        }
     return DEFAULT_PRICING
 
 
@@ -130,7 +146,8 @@ def estimate_ocr_cost(*, pages: int, engine: str | None = None) -> float:
     engine_pricing = _pricing_section(pricing.get("engines")).get(engine or "", {})
     engine_pricing = _pricing_section(engine_pricing)
     per_page = float(engine_pricing.get("per_page") or pricing["default_per_page"])
-    return max(0, pages) * per_page
+    markup = float(pricing.get("markup", 1.0))
+    return max(0, pages) * per_page * markup
 
 
 def estimate_transcribe_cost(*, minutes: float, provider: str = "soniox") -> float:
@@ -139,12 +156,42 @@ def estimate_transcribe_cost(*, minutes: float, provider: str = "soniox") -> flo
     provider_pricing = _pricing_section(pricing.get("providers")).get(provider, {})
     provider_pricing = _pricing_section(provider_pricing)
     per_minute = float(provider_pricing.get("per_minute", 1.0))
-    return max(0.0, minutes) * per_minute
+    markup = float(pricing.get("markup", 1.0))
+    return max(0.0, minutes) * per_minute * markup
 
 
 def estimate_youtube_cost() -> float:
     """Estimate one YouTube transcript API request cost."""
-    return float(pricing_config()["youtube"].get("per_request", 1.0))
+    pricing = pricing_config()["youtube"]
+    return float(pricing.get("per_request", 1.0)) * float(
+        pricing.get("markup", 1.0)
+    )
+
+
+def estimate_fixed_cost(section: str, price_key: str) -> float:
+    """Estimate a fixed-price operation with its configured markup."""
+    pricing = pricing_config().get(section) or {}
+    return float(pricing.get(price_key, 1.0)) * float(pricing.get("markup", 1.0))
+
+
+def estimate_speech_cost(*, chars: int) -> float:
+    """Estimate text-to-speech cost from input character count."""
+    pricing = pricing_config()["speech"]
+    base = (max(0, chars) / 1000) * float(
+        pricing.get("default_per_1k_chars", 0.5)
+    )
+    return max(0.01, base * float(pricing.get("markup", 1.0)))
+
+
+def estimate_image_cost(*, count: int = 1, model: str | None = None) -> float:
+    """Estimate image generation/edit cost with model override and markup."""
+    pricing = pricing_config()["image"]
+    model_pricing = _pricing_section(pricing.get("models")).get(model or "", {})
+    model_pricing = _pricing_section(model_pricing)
+    per_image = float(
+        model_pricing.get("per_image") or pricing.get("default_per_image", 1.0)
+    )
+    return max(0, count) * per_image * float(pricing.get("markup", 1.0))
 
 
 @asynccontextmanager
@@ -168,6 +215,7 @@ async def meter_cost(
     meta_data: dict | None = None,
     *,
     workspace_id: str | None = None,
+    idempotency_key: str | None = None,
 ) -> UsageSchema | None:
     """
     Record usage cost for a user.
@@ -179,6 +227,7 @@ async def meter_cost(
         workspace_id: When set, the cost is drawn from the workspace's
             shared quota pool instead of the user's personal balance,
             while user_id still records who incurred it.
+        idempotency_key: Stable operation key used by Finance to make retries safe.
 
     Returns:
         The created usage record schema.
@@ -186,6 +235,11 @@ async def meter_cost(
     if not Settings.finance_api_key:
         return None
     async with get_ufaas_client() as ufaas_client:
+        if idempotency_key is None and meta_data:
+            service = meta_data.get("service")
+            task_uid = meta_data.get("task_uid")
+            if service and task_uid:
+                idempotency_key = f"ai-toolkit:{service}:{task_uid}"
         usage_schema = UsageCreateSchema(
             user_id=user_id,
             workspace_id=workspace_id,
@@ -193,13 +247,24 @@ async def meter_cost(
             amount=Decimal(str(amount)),
             variant=resource_variant,
             meta_data=meta_data,
+            idempotency_key=idempotency_key,
         )
-        usage_response = await ufaas_client.post(
-            "/usages", json=usage_schema.model_dump(mode="json")
-        )
-        usage_response.raise_for_status()
-        usage = UsageSchema.model_validate(usage_response.json())
-        return usage
+        attempts = 3 if idempotency_key else 1
+        for attempt in range(attempts):
+            try:
+                usage_response = await ufaas_client.post(
+                    "/usages", json=usage_schema.model_dump(mode="json")
+                )
+                usage_response.raise_for_status()
+                return UsageSchema.model_validate(usage_response.json())
+            except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+                retryable_status = not isinstance(exc, httpx.HTTPStatusError) or (
+                    exc.response.status_code >= 500
+                )
+                if attempt + 1 >= attempts or not retryable_status:
+                    raise
+                await asyncio.sleep(0.1 * (attempt + 1))
+    return None
 
 
 async def get_quota(user_id: str, *, workspace_id: str | None = None) -> Decimal:

@@ -22,8 +22,7 @@ async def process_voice_morph(task: VoiceMorphTask) -> VoiceMorphTask:
     model_key = "so-vits-svc"
     model_id = REPLICATE_VOICE_MODELS.get(model_key, "cjwbw/so-vits-svc-5")
 
-    pricing = finance.pricing_config().get("voice_morph") or {}
-    amount = float(pricing.get("default_per_request", 1.0))
+    amount = finance.estimate_fixed_cost("voice_morph", "default_per_request")
     quota = await finance.check_quota(
         task.user_id, amount, raise_exception=False, workspace_id=task.workspace_id
     )
@@ -62,19 +61,24 @@ async def process_voice_morph(task: VoiceMorphTask) -> VoiceMorphTask:
         await task.save_report("No output from voice morph")
         return task
 
+    usage = None
     try:
-        await finance.meter_cost(
+        usage = await finance.meter_cost(
             task.user_id,
             amount,
             meta_data={
                 "service": "voicemorph",
                 "provider": "replicate",
                 "model": model_key,
+                "task_uid": task.uid,
             },
             workspace_id=task.workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter voice morph usage")
+
+    task.usage_amount = float(usage.amount) if usage else amount
+    task.usage_id = usage.uid if usage else None
 
     task.task_status = TaskStatusEnum.completed
     await task.save_report("Voice morphed successfully")

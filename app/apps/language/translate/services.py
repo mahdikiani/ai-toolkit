@@ -115,6 +115,7 @@ async def process_translate(task: TranslateTask) -> TranslateTask:
                     "service": "translate",
                     "prompt": "translate",
                     "provider_meta": provider_meta,
+                    "task_uid": task.uid,
                 },
                 workspace_id=task.workspace_id,
             )

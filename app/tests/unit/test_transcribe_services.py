@@ -386,7 +386,7 @@ class TestTranscriptionQuotaAndMetering:
 
         mock_check_quota.assert_called_once_with(
             task.user_id,
-            task.audio_duration / 60,
+            pytest.approx(task.audio_duration / 60 * 1.2),
             raise_exception=False,
             workspace_id=task.workspace_id,
         )
@@ -466,7 +466,12 @@ class TestTranscriptionQuotaAndMetering:
         mock_meter.assert_called_once_with(
             task.user_id,
             10.0,
-            meta_data={"service": "transcribe", "provider": "soniox", "chunks": 2},
+            meta_data={
+                "service": "transcribe",
+                "provider": "soniox",
+                "chunks": 2,
+                "task_uid": "task_123",
+            },
             workspace_id=task.workspace_id,
         )
 
@@ -524,7 +529,7 @@ class TestTranscriptionQuotaAndMetering:
         # Verify metering was called
         mock_meter.assert_called_once()
         # Cost should be ceil((60000 / 60 / 1000) * 10) = 10
-        assert mock_meter.call_args[0][1] == pytest.approx(1.0)
+        assert mock_meter.call_args[0][1] == pytest.approx(1.2)
 
     async def test_metering_failure_still_delivers_the_transcript(self) -> None:
         """

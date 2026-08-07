@@ -97,7 +97,11 @@ async def process_compressed_archive(
         usage = await finance.meter_cost(
             task.user_id,
             amount,
-            meta_data={"service": "ocr", "pages": total_pages},
+            meta_data={
+                "service": "ocr",
+                "pages": total_pages,
+                "task_uid": task.uid,
+            },
             workspace_id=task.workspace_id,
         )
     except Exception:

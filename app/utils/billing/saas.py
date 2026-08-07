@@ -72,6 +72,7 @@ class UsageCreateSchema(BaseModel):
     amount: Decimal = Decimal(1)
     variant: str | None = None
     meta_data: dict | None = None
+    idempotency_key: str | None = None
 
     @model_validator(mode="after")
     def validate_enrollment_id(self) -> Self:
@@ -120,6 +121,7 @@ class UsageSchema(TenantUserEntitySchema):
     amount: Decimal
     variant: str | None = None
     workspace_id: str | None = None
+    idempotency_key: str | None = None
 
     @classmethod
     def search_exclude_set(cls) -> list[str]:

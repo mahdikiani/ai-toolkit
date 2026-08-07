@@ -23,9 +23,7 @@ async def process_tts(task: TextToSpeechTask) -> TextToSpeechTask:
         await task.save_report(str(exc))
         return task
 
-    pricing = finance.pricing_config().get("speech") or {}
-    per_1k = float(pricing.get("default_per_1k_chars", 0.5))
-    amount = max(0.01, (len(task.text) / 1000) * per_1k)
+    amount = finance.estimate_speech_cost(chars=len(task.text))
 
     quota = await finance.check_quota(
         task.user_id, amount, raise_exception=False, workspace_id=task.workspace_id
@@ -56,8 +54,9 @@ async def process_tts(task: TextToSpeechTask) -> TextToSpeechTask:
 
     task.result_data = audio_bytes
 
+    usage = None
     try:
-        await finance.meter_cost(
+        usage = await finance.meter_cost(
             task.user_id,
             amount,
             meta_data={
@@ -65,11 +64,15 @@ async def process_tts(task: TextToSpeechTask) -> TextToSpeechTask:
                 "provider": "openrouter",
                 "model": task.model,
                 "chars": len(task.text),
+                "task_uid": task.uid,
             },
             workspace_id=task.workspace_id,
         )
     except Exception:
         logger.exception("Failed to meter TTS usage")
+
+    task.usage_amount = float(usage.amount) if usage else amount
+    task.usage_id = usage.uid if usage else None
 
     task.task_status = TaskStatusEnum.completed
     await task.save_report("Speech generated successfully")

@@ -61,21 +61,28 @@ class TestMediaClient:
         mock_upload = MagicMock()
         mock_upload.json.return_value = {"uid": "f1", "url": "https://media/x"}
         mock_upload.raise_for_status = MagicMock()
-        mock_patch = MagicMock()
-        mock_patch.raise_for_status = MagicMock()
+        mock_signed = MagicMock()
+        mock_signed.raise_for_status = MagicMock()
+        mock_signed.headers = {"location": "https://storage/signed"}
 
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(return_value=mock_upload)
-        mock_client.patch = AsyncMock(return_value=mock_patch)
+        mock_client.get = AsyncMock(return_value=mock_signed)
 
         with patch(
             "utils.integrations.media.get_media_client",
         ) as get_client:
             get_client.return_value.__aenter__.return_value = mock_client
             get_client.return_value.__aexit__.return_value = None
-            url = await media.upload_file(BytesIO(b"data"))
+            url = await media.upload_file(
+                BytesIO(b"data"), user_id="u1", workspace_id="w1"
+            )
 
-        assert url == "https://media/x"
+        assert url == "https://storage/signed"
+        assert mock_client.post.await_args.kwargs["data"] == {
+            "user_id": "u1",
+            "workspace_id": "w1",
+        }
 
 
 @pytest.mark.unit

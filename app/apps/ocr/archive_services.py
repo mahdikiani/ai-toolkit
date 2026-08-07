@@ -80,7 +80,11 @@ async def process_compressed_archive(
         temp_dir, temp_dir / "ocrs", process_file
     )
     zip_buffer = archive_utils.compress_directory_to_zip(temp_dir / "ocrs")
-    upload_result = await media.upload_file(zip_buffer)
+    upload_result = await media.upload_file(
+        zip_buffer,
+        user_id=task.user_id,
+        workspace_id=task.workspace_id,
+    )
     shutil.rmtree(temp_dir, ignore_errors=True)
 
     # Meter usage -- via estimate_ocr_cost so archive OCR respects the

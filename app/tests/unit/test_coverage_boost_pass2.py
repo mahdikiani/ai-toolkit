@@ -109,7 +109,7 @@ class TestOcrServicesCoverage:
         pipeline.get_footers.return_value = {}
         pipeline.get_all_crops.return_value = {}
 
-        async def upload(buf):
+        async def upload(buf, **_kwargs):
             data = buf.read() if hasattr(buf, "read") else b""
             if data == b"bad":
                 raise RuntimeError("up")
@@ -131,6 +131,8 @@ class TestOcrServicesCoverage:
                 "see (asset:1)",
                 BytesIO(b"%PDF"),
                 "application/pdf",
+                user_id="u1",
+                workspace_id="w1",
             )
         assert "https://media/x" in md
         assert url == "https://media/x"

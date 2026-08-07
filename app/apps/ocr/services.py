@@ -226,6 +226,9 @@ async def _upload_pipeline_assets_and_docx(
     result: str,
     file_content: BytesIO,
     file_type: str,
+    *,
+    user_id: str,
+    workspace_id: str | None,
 ) -> tuple[str, str | None]:
     """Upload visual assets, rewrite placeholders, and build a DOCX upload URL."""
     from PIL import Image
@@ -243,7 +246,9 @@ async def _upload_pipeline_assets_and_docx(
             try:
                 buf = BytesIO(asset["image_bytes"])
                 buf.seek(0)
-                url = await upload_file(buf)
+                url = await upload_file(
+                    buf, user_id=user_id, workspace_id=workspace_id
+                )
                 if url:
                     uploaded_assets[asset["id"]] = url
             except Exception:
@@ -269,7 +274,9 @@ async def _upload_pipeline_assets_and_docx(
             pdf_data=pdf_data,
         )
         docx_buf.seek(0)
-        docx_url = await upload_file(docx_buf)
+        docx_url = await upload_file(
+            docx_buf, user_id=user_id, workspace_id=workspace_id
+        )
     except Exception:
         logger.exception("DOCX generation / asset upload failed")
     return result, docx_url
@@ -322,7 +329,12 @@ async def _process_with_pipeline(
         )
 
     result, docx_url = await _upload_pipeline_assets_and_docx(
-        pipeline, result, file_content, file_type
+        pipeline,
+        result,
+        file_content,
+        file_type,
+        user_id=task.user_id,
+        workspace_id=task.workspace_id,
     )
 
     amount = finance.estimate_ocr_cost(pages=page_count, engine=engine.value)
@@ -411,7 +423,11 @@ async def _process_with_document_intelligence(
         for asset in result.assets:
             try:
                 content = await asyncio.to_thread(Path(asset.path).read_bytes)
-                url = await upload_file(BytesIO(content))
+                url = await upload_file(
+                    BytesIO(content),
+                    user_id=task.user_id,
+                    workspace_id=task.workspace_id,
+                )
                 if url:
                     url_map[asset.rel_path] = url
             except Exception:
@@ -419,7 +435,11 @@ async def _process_with_document_intelligence(
         if url_map:
             markdown = rewrite_asset_links(markdown, url_map)
 
-        docx_url = await upload_file(BytesIO(result.docx_bytes))
+        docx_url = await upload_file(
+            BytesIO(result.docx_bytes),
+            user_id=task.user_id,
+            workspace_id=task.workspace_id,
+        )
     except Exception:
         logger.exception("Asset/DOCX upload failed for task %s", task.uid)
     finally:

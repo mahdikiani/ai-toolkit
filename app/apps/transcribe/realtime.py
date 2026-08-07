@@ -179,7 +179,11 @@ async def persist_realtime_session(
         buf = BytesIO(audio)
         buf.name = audio_filename_for_format(audio_format)
         try:
-            file_url = await media.upload_file(buf)
+            file_url = await media.upload_file(
+                buf,
+                user_id=str(user.uid),
+                workspace_id=user.workspace_id,
+            )
         except Exception:
             logger.exception("Failed to upload realtime audio for user %s", user.uid)
             return None, None, "Failed to upload recorded audio"

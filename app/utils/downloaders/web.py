@@ -1,5 +1,6 @@
 """Download file bytes from web URLs."""
 
+import asyncio
 from io import BytesIO
 
 import httpx
@@ -23,17 +24,26 @@ async def download_bytes(url: str, *, http_timeout: float | None = 120.0) -> Byt
         follow_redirects=False,
         timeout=http_timeout,
     ) as client:
-        response = await client.get(download_url)
-        # Manually follow redirects so each hop is re-validated.
-        redirects = 0
-        while response.is_redirect and redirects < 5:
-            location = response.headers.get("location")
-            if not location:
+        # Media storage can be eventually consistent immediately after an
+        # upload: the signed URL briefly returns 404 before the object is
+        # visible. Retry only that transient condition.
+        response: httpx.Response | None = None
+        for attempt in range(4):
+            response = await client.get(download_url)
+            # Manually follow redirects so each hop is re-validated.
+            redirects = 0
+            while response.is_redirect and redirects < 5:
+                location = response.headers.get("location")
+                if not location:
+                    break
+                assert_safe_url(location)
+                response = await client.get(location)
+                redirects += 1
+            if response.status_code != 404 or attempt == 3:
                 break
-            assert_safe_url(location)
-            response = await client.get(location)
-            redirects += 1
+            await asyncio.sleep(2**attempt)
 
+        assert response is not None
         response.raise_for_status()
 
         if is_gdrive_url(url) and "text/html" in response.headers.get(

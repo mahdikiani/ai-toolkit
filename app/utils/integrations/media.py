@@ -24,7 +24,6 @@ async def get_media_client() -> AsyncGenerator[httpx.AsyncClient]:
     async with httpx.AsyncClient(
         base_url=Settings.media_base_url or "https://media.uln.me/api/media/v1/",
         headers={"x-api-key": Settings.media_api_key or ""},
-        follow_redirects=True,
     ) as client:
         yield client
 
@@ -63,7 +62,10 @@ async def upload_file(
         response = await media_client.get(
             f"/f/{file_id}", params={"signed_url": True}
         )
-        response.raise_for_status()
+        # Media returns the signed URL in the Location header of a 307
+        # response.  Do not follow it: the caller needs that URL itself.
+        if not response.is_redirect:
+            response.raise_for_status()
         signed_url = response.headers.get("location")
         if not signed_url:
             raise MediaUploadError("missing_signed_url")

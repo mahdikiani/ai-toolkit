@@ -1,5 +1,5 @@
 """
-Synchronous Markdown -> DOCX conversion API.
+Synchronous Markdown document conversion API.
 
 Unlike the OCR/webpage/transcribe apps, this needs no task/polling model:
 it's pure CPU text-to-XML work (no OCR/VLM/LLM calls), done in well under
@@ -11,9 +11,8 @@ correct w:lang bidi handling) through the same renderer the OCR pipeline
 uses, instead of maintaining a separate, cruder pandoc-based conversion
 locally.
 
-Two endpoints share the same conversion (parse_markdown -> render_docx)
-and only differ in how the Markdown arrives: as a JSON string in the
-request body, or as an uploaded .md file.
+Each output format has JSON-string and uploaded-file variants. Both reuse
+the shared ``parse_markdown`` path and the corresponding DocumentAST renderer.
 """
 
 from __future__ import annotations
@@ -31,6 +30,7 @@ from utils.usso import get_usso
 from .document_intelligence.ast import DocumentAST
 from .document_intelligence.markdown_parser import parse_markdown
 from .document_intelligence.renderers.docx import render_docx
+from .document_intelligence.renderers.pdf import render_pdf
 
 router = APIRouter(prefix="/document-convert", tags=["Document Convert"])
 auth = get_usso(raise_exception=True)
@@ -38,6 +38,7 @@ auth = get_usso(raise_exception=True)
 _DOCX_MEDIA_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
+_PDF_MEDIA_TYPE = "application/pdf"
 
 
 class MarkdownToDocxRequest(BaseModel):
@@ -72,6 +73,15 @@ def _docx_response(ast: DocumentAST, file_name: str) -> StreamingResponse:
     )
 
 
+def _pdf_response(ast: DocumentAST, file_name: str) -> StreamingResponse:
+    buf = render_pdf(ast)
+    return StreamingResponse(
+        buf,
+        media_type=_PDF_MEDIA_TYPE,
+        headers={"Content-Disposition": _content_disposition(file_name)},
+    )
+
+
 @router.post("/markdown-to-docx")
 async def markdown_to_docx(
     data: MarkdownToDocxRequest,
@@ -94,3 +104,27 @@ async def markdown_to_docx_upload(
     resolved_title = title or (Path(file.filename).stem if file.filename else "")
     ast = parse_markdown(markdown, title=resolved_title)
     return _docx_response(ast, f"{resolved_title or 'document'}.docx")
+
+
+@router.post("/markdown-to-pdf")
+async def markdown_to_pdf(
+    data: MarkdownToDocxRequest,
+    user: UserData = Depends(auth),
+) -> StreamingResponse:
+    """Convert a Markdown string to an A4, RTL-correct PDF file."""
+    ast = parse_markdown(data.markdown, title=data.title)
+    return _pdf_response(ast, "document.pdf")
+
+
+@router.post("/markdown-to-pdf/upload")
+async def markdown_to_pdf_upload(
+    file: UploadFile = File(...),
+    title: str = Form(""),
+    user: UserData = Depends(auth),
+) -> StreamingResponse:
+    """Convert an uploaded .md file to an A4, RTL-correct PDF file."""
+    raw = await file.read()
+    markdown = raw.decode("utf-8", errors="replace")
+    resolved_title = title or (Path(file.filename).stem if file.filename else "")
+    ast = parse_markdown(markdown, title=resolved_title)
+    return _pdf_response(ast, f"{resolved_title or 'document'}.pdf")

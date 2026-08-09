@@ -590,6 +590,43 @@ class TestRtlLtrRatioThreshold:
         assert english_bidi.get(qn("w:val")) == "0"
         assert persian_bidi.get(qn("w:val")) == "1"
 
+    def test_chart_data_table_cells_are_judged_per_cell_too(self, tmp_path) -> None:
+        """
+        Regression: `_add_chart`'s own auxiliary Label/Value data table is
+        a second table-building code path, separate from `_add_table`,
+        and was initially missed by this fix -- an all-English chart's
+        data table stayed forced-RTL/right-aligned even after body
+        paragraphs and regular tables were correctly fixed."""
+        from docx.oxml.ns import qn
+
+        img_path = tmp_path / "chart.png"
+        Image.new("RGB", (50, 50), "white").save(img_path)
+        node = ASTNode(
+            type=LayoutType.chart,
+            asset_path=str(img_path),
+            chart_data={
+                "data": [
+                    {"label": "Revenue", "value": "Q1"},
+                    {"label": "درآمد", "value": "س۱"},
+                ]
+            },
+        )
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        doc = _open(render_docx(doc_ast))
+
+        table = doc.tables[0]
+        english_cell_p = table.cell(1, 0).paragraphs[0]
+        persian_cell_p = table.cell(2, 0).paragraphs[0]
+
+        english_bidi = english_cell_p._p.find(qn("w:pPr")).find(qn("w:bidi"))
+        persian_bidi = persian_cell_p._p.find(qn("w:pPr")).find(qn("w:bidi"))
+
+        assert english_bidi is not None
+        assert english_bidi.get(qn("w:val")) == "0"
+        assert persian_bidi is not None
+        assert persian_bidi.get(qn("w:val")) == "1"
+
 
 _WML_XSD_CANDIDATES = [
     "/home/mahdi/.grok/skills/docx/scripts/office/schemas/ISO-IEC29500-4_2016/wml.xsd",

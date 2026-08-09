@@ -961,7 +961,16 @@ def _add_chart(
         tbl.style = "Table Grid"
         for ri, row_data in enumerate(rows):
             for ci, val in enumerate(row_data):
-                tbl.cell(ri, ci).text = val
+                cell = tbl.cell(ri, ci)
+                cell.text = val
+                # Same per-cell ratio judgment as _add_table -- chart
+                # labels/values are just as capable of being all-English
+                # (or a mix) as any other table content, and this second
+                # table-building code path was previously left entirely
+                # untouched by the RTL/LTR fix, silently keeping the
+                # forced-RTL regression alive for chart data tables.
+                for paragraph in cell.paragraphs:
+                    _apply_direction(paragraph, paragraph.text)
 
 
 def _add_code(doc: Document, node: object) -> None:

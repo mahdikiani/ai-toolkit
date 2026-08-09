@@ -242,8 +242,8 @@ def _document_html(ast: DocumentAST) -> str:
     h4 {{ font-size: 15pt; }}
     h5 {{ font-size: 14pt; }}
     h6 {{ font-size: 13pt; }}
-    p {{ margin: 0.45em 0; text-align: right; }}
-    ul, ol {{ margin: 0.4em 0; padding-right: 1.6em; padding-left: 0; }}
+    p {{ margin: 0.45em 0; text-align: start; }}
+    ul, ol {{ margin: 0.4em 0; padding-inline-start: 1.6em; padding-inline-end: 0; }}
     li {{ margin: 0.15em 0; }}
     table {{
       width: 100%;
@@ -255,7 +255,7 @@ def _document_html(ast: DocumentAST) -> str:
     th, td {{
       border: 1px solid #777;
       padding: 0.35em 0.5em;
-      text-align: right;
+      text-align: start;
       overflow-wrap: anywhere;
       word-break: break-word;
     }}

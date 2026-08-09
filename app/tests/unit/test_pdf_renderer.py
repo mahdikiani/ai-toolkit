@@ -59,6 +59,39 @@ Introductory paragraph.
         assert phrase in text
         assert phrase[::-1] not in text
 
+    def test_english_paragraph_is_left_aligned_not_forced_right(self) -> None:
+        """
+        A fully-English document must render left-aligned, not RTL.
+
+        Regression: ``p { text-align: right }`` was hardcoded regardless
+        of the paragraph's own ``dir`` -- per-character bidi ordering was
+        already correct (see test_persian_text_round_trips_in_logical_
+        order for that), but visually every paragraph, including pure
+        English ones, was pushed flush to the page's right margin. Using
+        the CSS logical value ``text-align: start`` (resolved from each
+        element's own direction, not the page's blanket dir="rtl")
+        fixes this: an English paragraph's short wrapped line must sit
+        near the *left* margin, not the right one.
+        """
+        pdf = _open_pdf(
+            "This is a long English paragraph that should wrap across at "
+            "least two lines so we can check where the short final line "
+            "lands on the page, left or right."
+        )
+        page = pdf[0]
+        lines = [
+            line
+            for block in page.get_text("dict")["blocks"]
+            if "lines" in block
+            for line in block["lines"]
+        ]
+        assert len(lines) >= 2, "expected the paragraph to wrap"
+        last_line = lines[-1]
+        left_margin = 56.7  # 2cm page margin, in points
+        assert last_line["bbox"][0] == pytest.approx(left_margin, abs=10), (
+            f"last line should start near the left margin, got {last_line['bbox']}"
+        )
+
     def test_page_size_is_a4(self) -> None:
         pdf = _open_pdf("A4 document")
         page = pdf[0]

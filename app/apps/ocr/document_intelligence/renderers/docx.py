@@ -48,6 +48,67 @@ CENTER_MAX_WIDTH_RATIO = 0.7
 
 MIN_IMAGE_WIDTH_IN = 1.5
 
+# Unicode ranges of RTL scripts (Hebrew, Arabic incl. Persian core letters,
+# Syriac, Arabic Supplement, Thaana, Arabic Extended-A, and the Hebrew/Arabic
+# presentation-forms blocks). Identical to ``pdf.py``'s ``_RTL_RANGES``
+# (kept in sync by hand, not imported) -- the sibling renderer uses these
+# ranges for a *different* per-element heuristic (first-strong-character
+# direction, HTML5 ``dir="auto"`` semantics), whereas this module needs a
+# percentage-based ratio per the confirmed product rule below, so the two
+# renderers share the underlying character classification but not the
+# decision function built on top of it. Duplicated rather than extracted
+# into a shared module because doing so would require editing pdf.py too,
+# which is out of scope for this change.
+_RTL_RANGES = (
+    (0x0590, 0x05FF),  # Hebrew
+    (0x0600, 0x06FF),  # Arabic (includes Persian core letters)
+    (0x0700, 0x074F),  # Syriac
+    (0x0750, 0x077F),  # Arabic Supplement
+    (0x0780, 0x07BF),  # Thaana
+    (0x08A0, 0x08FF),  # Arabic Extended-A
+    (0xFB1D, 0xFDFF),  # Hebrew / Arabic presentation forms A
+    (0xFE70, 0xFEFF),  # Arabic presentation forms B
+)
+
+# Confirmed product rule (user, verbatim): "if 20% or more of a paragraph's
+# alphabetic characters are Persian/Arabic (RTL-range), treat the paragraph
+# as RTL. Otherwise, treat it as LTR." The threshold is inclusive (>=),
+# matching "20% or more" literally.
+RTL_RATIO_THRESHOLD = 0.2
+
+
+def _is_rtl_char(ch: str) -> bool:
+    code = ord(ch)
+    return any(start <= code <= end for start, end in _RTL_RANGES)
+
+
+def _rtl_ratio(text: str) -> float:
+    """
+    Fraction of `text`'s *alphabetic* characters that are RTL-range.
+
+    Digits, punctuation, whitespace, and symbols are excluded from both
+    the numerator and denominator -- only alphabetic characters count, per
+    the confirmed product rule. A paragraph with zero alphabetic
+    characters (empty text, or text made up only of digits/punctuation/
+    symbols -- e.g. a bare page number "7" or a rule "---") has no
+    evidence of RTL content either way, so it defaults to LTR (ratio
+    0.0) rather than RTL: that is both the conservative choice for the
+    exact regression this fix targets (an all-English document must
+    never end up forced RTL by non-alphabetic filler paragraphs) and
+    consistent with English being python/Word's own "no information"
+    default language.
+    """
+    alpha_chars = [ch for ch in text if ch.isalpha()]
+    if not alpha_chars:
+        return 0.0
+    rtl_count = sum(1 for ch in alpha_chars if _is_rtl_char(ch))
+    return rtl_count / len(alpha_chars)
+
+
+def _is_rtl_paragraph(text: str) -> bool:
+    """Return True when `text` meets the 20%-or-more RTL-alphabetic-char threshold."""
+    return _rtl_ratio(text) >= RTL_RATIO_THRESHOLD
+
 
 def render_docx(ast: DocumentAST, pdf_data: bytes | None = None) -> BytesIO:
     """
@@ -268,7 +329,7 @@ def _write_promoted_regions(part: object, regions: tuple[PromotedRegion, ...]) -
                 field_code = "PAGE" if segment.kind == "page" else "NUMPAGES"
                 add_field_run(paragraph, field_code, segment.text)
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _ensure_rtl(paragraph)
+        _apply_direction(paragraph, paragraph.text)
 
 
 def _collect_header_footer(ast: DocumentAST) -> tuple[str, str]:
@@ -302,7 +363,7 @@ def _set_section_header(doc: Document, text: str) -> None:
     )
     p.text = text
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _ensure_rtl(p)
+    _apply_direction(p, text)
 
 
 def _set_section_footer(doc: Document, text: str) -> None:
@@ -315,10 +376,33 @@ def _set_section_footer(doc: Document, text: str) -> None:
     )
     p.text = text
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _ensure_rtl(p)
+    _apply_direction(p, text)
 
 
 def _setup_styles(doc: Document, font_cs: str, font_latin: str) -> None:
+    """
+    Set up Normal/Heading styles, including their RTL bidi/alignment default.
+
+    Deliberately still RTL by default (unchanged by the per-paragraph
+    RTL-ratio fix below) -- every paragraph this renderer actually builds
+    now runs through `_apply_direction`, which explicitly calls
+    `_ensure_rtl` *or* `_ensure_ltr` on it based on its own text, so this
+    style-level default no longer determines any real body content's
+    direction; it only remains as the inherited fallback for the small
+    number of paragraphs that carry no natural-language text of their own
+    and already set their own alignment explicitly regardless of bidi
+    (e.g. the centered OMML-equation container in `_add_formula`, the
+    centered image container in `_add_image`). Flipping this document-wide
+    default to LTR instead would be a much larger-blast-radius change --
+    it would also flip the doc-defaults proofing language/complex-script
+    settings for every one of those non-text containers -- for no
+    behavioral benefit, since none of them have real text whose direction
+    matters and this application's dominant use case (OCR of Persian
+    documents) makes RTL the more sensible baseline for anything that
+    *does* fall through to it. See `_ensure_ltr` for the paragraph-level
+    override that actually fixes the reported all-English-document
+    regression.
+    """
     _set_doc_defaults_bidi_lang(doc)
 
     style = doc.styles["Normal"]
@@ -636,7 +720,7 @@ def _add_heading(
     p.alignment = (
         _resolve_alignment(node, page_width_px) if node else WD_ALIGN_PARAGRAPH.RIGHT
     )
-    _ensure_rtl(p)
+    _apply_direction(p, p.text)
 
 
 def _add_inline_runs(paragraph: object, text: str) -> None:
@@ -707,7 +791,7 @@ def _add_paragraph(
     p.alignment = (
         _resolve_alignment(node, page_width_px) if node else WD_ALIGN_PARAGRAPH.RIGHT
     )
-    _ensure_rtl(p)
+    _apply_direction(p, p.text)
 
 
 def _add_list(doc: Document, node: object) -> None:
@@ -716,7 +800,7 @@ def _add_list(doc: Document, node: object) -> None:
         p = doc.add_paragraph(style=style)
         _add_inline_runs(p, child.text or "")
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        _ensure_rtl(p)
+        _apply_direction(p, p.text)
 
 
 def _add_table(doc: Document, node: object) -> None:
@@ -734,9 +818,14 @@ def _add_table(doc: Document, node: object) -> None:
             cell.text = ""
             paragraph = cell.paragraphs[0]
             _add_inline_runs(paragraph, str(cell_text))
+            # Ratio computed per cell, not per table/row: a genuinely mixed
+            # table (e.g. an English label column next to a Persian value
+            # column) needs each cell judged on its own content, not one
+            # table-wide verdict that would force every cell into
+            # whichever language happens to dominate the table overall.
             for paragraph in cell.paragraphs:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                _ensure_rtl(paragraph)
+                _apply_direction(paragraph, paragraph.text)
 
     # Reconstruct rowspan/colspan as real merged Word table cells instead of
     # leaving them as separate cells with duplicated/blank text -- see
@@ -944,13 +1033,72 @@ def _set_shading(p: object) -> None:
     p_pr.insert_element_before(shd, *_PPR_TAGS_AFTER_SHD)
 
 
+def _apply_direction(p: object, text: str) -> None:
+    """
+    Pick RTL vs. LTR for paragraph `p` from `text`'s own RTL-alphabetic ratio.
+
+    This is the single decision point every call site funnels through --
+    replaces what used to be an unconditional `_ensure_rtl(p)` call at
+    every paragraph/heading/list-item/table-cell/header-footer site,
+    which forced RTL bidi + right alignment onto every paragraph
+    regardless of its actual language content (the reported regression:
+    an all-English source document rendered as an all-RTL Word file).
+    """
+    if _is_rtl_paragraph(text):
+        _ensure_rtl(p)
+    else:
+        _ensure_ltr(p)
+
+
 def _ensure_rtl(p: object) -> None:
     p_pr = p._element.get_or_add_pPr()
-    _insert_bidi(p_pr)
+    _insert_bidi(p_pr, rtl=True)
     _use_logical_alignment(p_pr)
     _set_proof_lang(_get_or_add_ppr_rpr(p_pr))
     for run in p.runs:
         _set_proof_lang(run._element.get_or_add_rPr())
+
+
+def _ensure_ltr(p: object) -> None:
+    """
+    Explicitly mark a paragraph as left-to-right, overriding the RTL style default.
+
+    See `_setup_styles`/`_set_bidi_and_fonts` for that default. Mirrors
+    `_ensure_rtl`'s structure and OOXML-schema-order discipline
+    (same `_insert_bidi` insertion helper, same schema-order tag list,
+    same paragraph-mark/`run` `rPr` handling), but differs in three ways
+    that matter:
+
+    - `_insert_bidi(p_pr, rtl=False)` writes an *explicit*
+      `<w:bidi w:val="0"/>`, not merely an absent `<w:bidi/>`. Absent
+      would silently fall through to the style's own `<w:bidi w:val="1"/>`
+      default (see `_setup_styles`) rather than actually flipping this
+      paragraph to LTR -- deliberately left at the style level rather than
+      changed there (see the module-level note above `_setup_styles`), so
+      every paragraph that isn't judged RTL must positively override it.
+    - Alignment: `_use_logical_alignment` (the RTL branch) rewrites a
+      physical `<w:jc w:val="right"/>` to the *logical* "start" value so it
+      keeps meaning "right" once `<w:bidi/>` flips the paragraph's reading
+      direction (see that function's docstring for why "right" itself
+      isn't enough in real Word). An LTR paragraph has no such
+      reinterpretation to guard against -- its reading-direction start is
+      already the physical left edge -- so `_use_physical_left_alignment`
+      instead rewrites that same "right" default (this renderer's
+      RTL-body-text assumption, set before either `_ensure_*` function
+      runs) to plain physical "left". Center/other `<w:jc/>` values (a
+      genuinely bbox-centered heading, a centered header/footer line) are
+      left untouched either way.
+    - Language: `_set_ltr_lang` sets `<w:rtl w:val="0"/>` and a plain
+      `en-US` `<w:lang/>` (no `w:bidi` attribute) rather than Persian, so
+      spell-check and other language-dependent Word behavior treats this
+      paragraph as ordinary Latin-script text.
+    """
+    p_pr = p._element.get_or_add_pPr()
+    _insert_bidi(p_pr, rtl=False)
+    _use_physical_left_alignment(p_pr)
+    _set_ltr_lang(_get_or_add_ppr_rpr(p_pr))
+    for run in p.runs:
+        _set_ltr_lang(run._element.get_or_add_rPr())
 
 
 def _use_logical_alignment(p_pr: object) -> None:
@@ -973,19 +1121,53 @@ def _use_logical_alignment(p_pr: object) -> None:
         jc.set(qn("w:val"), "start")
 
 
-def _insert_bidi(p_pr: object) -> None:
+def _use_physical_left_alignment(p_pr: object) -> None:
     """
-    Add <w:bidi/> to a pPr at its correct schema position (idempotent).
+    Convert a physical <w:jc w:val="right"/> to physical "left", for LTR paragraphs.
 
-    Explicit w:val="1" rather than a bare <w:bidi/> -- CT_OnOff's implied
+    Mirrors `_use_logical_alignment`'s role for the RTL branch, but the
+    correct target value is different: an RTL paragraph needs the
+    *logical* "start" value (see that function's docstring for why plain
+    "right" isn't enough in real Word), whereas an LTR paragraph's
+    reading-direction start is already the physical left edge -- plain
+    "left" is correct and unambiguous, no bidi-dependent logical value
+    needed. <w:jc>'s other values (center, both, ...) -- e.g. a genuinely
+    bbox-centered heading, or a centered header/footer paragraph -- are
+    left untouched, exactly like `_use_logical_alignment` leaves them.
+    """
+    jc = p_pr.find(qn("w:jc"))
+    if jc is not None and jc.get(qn("w:val")) == "right":
+        jc.set(qn("w:val"), "left")
+
+
+def _insert_bidi(p_pr: object, *, rtl: bool = True) -> None:
+    """
+    Set <w:bidi/> on a pPr at its correct schema position (idempotent).
+
+    Explicit w:val="1"/"0" rather than a bare <w:bidi/> (for the RTL case)
+    or simply leaving it absent (for the LTR case) -- CT_OnOff's implied
     default is "true" per spec, but not every Word build reliably applies
     that implicit default; a known-working reference implementation
-    (hawzeh-tts's docx_lang.py/markdown_docx.py) always sets it explicitly.
+    (hawzeh-tts's docx_lang.py/markdown_docx.py) always sets it
+    explicitly. An explicit "0" additionally matters here because the
+    Normal/Heading *styles* this paragraph inherits from carry their own
+    `<w:bidi w:val="1"/>` (see `_setup_styles`/`_set_bidi_and_fonts`) -- an
+    absent paragraph-level <w:bidi/> would silently fall through to that
+    RTL style default instead of actually overriding it to LTR.
+
+    Idempotent for repeated calls with the *same* `rtl` value (matching
+    the original behavior); a later call with a *different* `rtl` value
+    updates the existing element's value in place rather than being a
+    no-op, so re-deciding a paragraph's direction after an earlier call
+    still lands correctly without reordering anything already inserted.
     """
-    if p_pr.find(qn("w:bidi")) is not None:
+    val = "1" if rtl else "0"
+    existing = p_pr.find(qn("w:bidi"))
+    if existing is not None:
+        existing.set(qn("w:val"), val)
         return
     bidi = OxmlElement("w:bidi")
-    bidi.set(qn("w:val"), "1")
+    bidi.set(qn("w:val"), val)
     p_pr.insert_element_before(bidi, *_PPR_TAGS_AFTER_BIDI)
 
 
@@ -1033,4 +1215,30 @@ def _set_proof_lang(pr: object) -> None:
     lang = OxmlElement("w:lang")
     lang.set(qn("w:val"), "fa-IR")
     lang.set(qn("w:bidi"), "fa-IR")
+    pr.append(lang)
+
+
+def _set_ltr_lang(pr: object) -> None:
+    """
+    Set proofing language and left-to-right script on an rPr element.
+
+    The LTR mirror of `_set_proof_lang` -- see that function's docstring
+    for why `pr` must be a real <w:rPr> and never a <w:pPr> directly.
+
+    Sets <w:rtl w:val="0"/> (explicit, for the same reason `_insert_bidi`
+    sets an explicit <w:bidi w:val="0"/> rather than leaving it absent:
+    the surrounding style default is RTL) and a plain `en-US` <w:lang/>
+    with no `w:bidi` attribute. The `w:bidi` attribute on `<w:lang/>` only
+    names the document's complex-script *proofing* language for whatever
+    complex-script runs might appear -- it doesn't affect this run's own
+    reading direction (that's `w:rtl`/`w:bidi` above) -- so it's simply
+    left unset here rather than pointed at some LTR-appropriate value,
+    matching how real Word itself leaves it off a plain Latin-script run.
+    """
+    rtl = pr.get_or_add_rtl()
+    rtl.set(qn("w:val"), "0")
+    for old in pr.findall(qn("w:lang")):
+        pr.remove(old)
+    lang = OxmlElement("w:lang")
+    lang.set(qn("w:val"), "en-US")
     pr.append(lang)

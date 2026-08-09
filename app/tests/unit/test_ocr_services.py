@@ -486,7 +486,7 @@ class TestOcrQuotaAndErrorHandling:
             result = await process_ocr(task)
 
         assert result.task_status == TaskStatusEnum.error
-        task.save_report.assert_called_once_with("insufficient_quota")
+        task.save_report.assert_called_once_with("insufficient_quota:2:3")
 
     async def test_no_quota_check_for_direct_processing(self) -> None:
         """process_ocr should not check quota for DOCX/PPTX direct processing."""

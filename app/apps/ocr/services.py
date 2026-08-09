@@ -159,7 +159,9 @@ async def process_ocr(task: OcrTask) -> OcrTask:
         )
         if quota < len(pages):
             logging.error("Insufficient quota for task %s", task.uid)
-            return await save_error(task, "insufficient_quota")
+            return await save_error(
+                task, f"insufficient_quota:{quota}:{len(pages)}"
+            )
 
         if engine in (OcrEngineType.paddle, OcrEngineType.paddleocr_vl_1_5):
             text_pages = await process_pages_with_paddle(pages)
@@ -313,7 +315,9 @@ async def _process_with_pipeline(
         workspace_id=task.workspace_id,
     )
     if quota < page_count:
-        return await save_error(task, "insufficient_quota")
+        return await save_error(
+            task, f"insufficient_quota:{quota}:{page_count}"
+        )
 
     pipeline = DocumentPipeline(
         dpi=getattr(Settings, "ocr_pipeline_dpi", 300),
@@ -402,7 +406,9 @@ async def _process_with_document_intelligence(
         workspace_id=task.workspace_id,
     )
     if quota < page_count:
-        return await save_error(task, "insufficient_quota")
+        return await save_error(
+            task, f"insufficient_quota:{quota}:{page_count}"
+        )
 
     filename = f"document{_EXTENSION_BY_MIME.get(file_type, '')}"
     di_pipeline = DocumentIntelligencePipeline()

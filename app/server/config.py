@@ -85,6 +85,14 @@ class Settings(config.Settings):
     )
     ocr_di_iou_threshold: float = float(os.getenv("OCR_DI_IOU_THRESHOLD", "0.40"))
     ocr_di_max_concurrent_vlm: int = int(os.getenv("OCR_DI_MAX_CONCURRENT_VLM", "5"))
+    # Layout detection (PaddleX predictor) is not safe to call concurrently on
+    # one shared model instance -- see LayoutDetector/DocumentIntelligencePipeline
+    # for details -- so this bounds how many pages may be "in flight" at once
+    # (each still serializes on layout detection via a lock, but their VLM/HTTP
+    # element-extraction step overlaps), not raw parallel inference.
+    ocr_di_max_concurrent_pages: int = int(
+        os.getenv("OCR_DI_MAX_CONCURRENT_PAGES", "4")
+    )
     ocr_di_output_debug: bool = (
         os.getenv("OCR_DI_OUTPUT_DEBUG", "false").lower() == "true"
     )

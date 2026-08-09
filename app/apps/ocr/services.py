@@ -80,6 +80,11 @@ _EXTENSION_BY_MIME = {
 
 _PROGRESS_REPORT_EVERY_PAGES = 10
 
+# Asset uploads are pure I/O (HTTP PUT to media storage) -- bounded concurrency
+# here matches the style of process_pages_batch's semaphore below, just applied
+# to uploads instead of VLM calls.
+_ASSET_UPLOAD_MAX_CONCURRENT = 10
+
 
 def _make_progress_reporter(task: OcrTask) -> Callable[[int, int], Awaitable[None]]:
     """
@@ -383,6 +388,7 @@ async def _process_with_document_intelligence(
     import shutil
 
     from .document_intelligence import DocumentIntelligencePipeline, summarize_stats
+    from .document_intelligence.assets import Asset
     from .document_intelligence.renderers.markdown import rewrite_asset_links
     from .pipeline.renderer import count_pdf_bytes
 
@@ -419,19 +425,28 @@ async def _process_with_document_intelligence(
     try:
         from utils.integrations.media import upload_file
 
-        url_map: dict[str, str] = {}
-        for asset in result.assets:
-            try:
-                content = await asyncio.to_thread(Path(asset.path).read_bytes)
-                url = await upload_file(
-                    BytesIO(content),
-                    user_id=task.user_id,
-                    workspace_id=task.workspace_id,
-                )
-                if url:
-                    url_map[asset.rel_path] = url
-            except Exception:
-                logger.exception("Failed to upload asset %s", asset.rel_path)
+        upload_semaphore = asyncio.Semaphore(_ASSET_UPLOAD_MAX_CONCURRENT)
+
+        async def _upload_one_asset(asset: Asset) -> tuple[str, str] | None:
+            async with upload_semaphore:
+                try:
+                    content = await asyncio.to_thread(Path(asset.path).read_bytes)
+                    url = await upload_file(
+                        BytesIO(content),
+                        user_id=task.user_id,
+                        workspace_id=task.workspace_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to upload asset %s", asset.rel_path)
+                    return None
+                if not url:
+                    return None
+                return asset.rel_path, url
+
+        uploaded = await asyncio.gather(
+            *(_upload_one_asset(asset) for asset in result.assets)
+        )
+        url_map = dict(entry for entry in uploaded if entry is not None)
         if url_map:
             markdown = rewrite_asset_links(markdown, url_map)
 

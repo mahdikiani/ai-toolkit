@@ -1,4 +1,4 @@
-"""Integration tests for Markdown -> DOCX conversion API endpoints."""
+"""Integration tests for Markdown document conversion API endpoints."""
 
 import httpx
 import pytest
@@ -44,3 +44,26 @@ class TestMarkdownToDocxRoutes:
         never be silently accepted either)."""
         response = await client.post("/document-convert/markdown-to-docx/upload")
         assert response.status_code in (401, 403, 422)
+
+
+@pytest.mark.integration
+class TestMarkdownToPdfRoutes:
+    """Auth and application wiring tests for the PDF conversion endpoints."""
+
+    async def test_markdown_to_pdf_without_auth(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        response = await client.post(
+            "/document-convert/markdown-to-pdf",
+            json={"markdown": "# hello", "title": "test"},
+        )
+        assert response.status_code in (401, 403)
+
+    async def test_markdown_to_pdf_upload_without_auth(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        response = await client.post(
+            "/document-convert/markdown-to-pdf/upload",
+            files={"file": ("test.md", b"# hello", "text/markdown")},
+        )
+        assert response.status_code in (401, 403)

@@ -13,6 +13,8 @@ from apps.ocr.convert_routes import (
     MarkdownToDocxRequest,
     markdown_to_docx,
     markdown_to_docx_upload,
+    markdown_to_pdf,
+    markdown_to_pdf_upload,
 )
 
 _FAKE_USER = UserData(sub="test-user")
@@ -114,3 +116,37 @@ class TestMarkdownToDocxUploadEndpoint:
         body = await _collect(response)  # must not raise
 
         assert len(body) > 0
+
+
+@pytest.mark.unit
+class TestMarkdownToPdfEndpoints:
+    async def test_json_endpoint_returns_pdf_with_ascii_filename(self) -> None:
+        data = MarkdownToDocxRequest(markdown="# Report\n\nPDF body", title="Report")
+
+        response = await markdown_to_pdf(data, user=_FAKE_USER)
+        body = await _collect(response)
+
+        assert response.status_code == 200
+        assert response.media_type == "application/pdf"
+        assert 'filename="document.pdf"' in response.headers["Content-Disposition"]
+        assert body.startswith(b"%PDF-")
+
+    async def test_upload_endpoint_returns_pdf_with_persian_filename(self) -> None:
+        from urllib.parse import unquote
+
+        upload = _FakeUploadFile("# عنوان\n\nمتن فارسی".encode(), "notes.md")
+
+        response = await markdown_to_pdf_upload(
+            file=upload,
+            title="گزارش فارسی",
+            user=_FAKE_USER,
+        )
+        body = await _collect(response)
+        disposition = response.headers["Content-Disposition"]
+
+        assert response.status_code == 200
+        assert response.media_type == "application/pdf"
+        assert "filename*=UTF-8''" in disposition
+        encoded = disposition.split("filename*=UTF-8''", 1)[1]
+        assert unquote(encoded) == "گزارش فارسی.pdf"
+        assert body.startswith(b"%PDF-")

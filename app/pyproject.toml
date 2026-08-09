@@ -29,6 +29,7 @@ dependencies = [
     "ufaas>=0.5.3",
     "usso>=0.31.9",
     "uvicorn>=0.51.0",
+    "weasyprint>=67.0",
     "websockets>=16.0",
     "zstandard>=0.25.0",
 ]

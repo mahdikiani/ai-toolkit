@@ -442,6 +442,192 @@ class TestRtlLayout:
         assert matching[0].alignment == WD_ALIGN_PARAGRAPH.LEFT
 
 
+@pytest.mark.document_intelligence
+class TestRtlLtrRatioThreshold:
+    """
+    A paragraph is RTL only when 20%-or-more of its own *alphabetic*
+    characters are RTL-range (see docx._rtl_ratio/_is_rtl_paragraph) --
+    not unconditionally, regardless of its actual language content. This
+    is the fix for the reported regression: converting a fully-English
+    document to Word previously forced the entire file RTL with every
+    paragraph right-aligned.
+    """
+
+    def test_all_english_paragraph_in_otherwise_persian_document_renders_ltr(
+        self,
+    ) -> None:
+        """
+        The exact reported regression, at paragraph granularity: an
+        all-English paragraph living in an otherwise-Persian document must
+        render LTR/left-aligned, not RTL just because it inherits the
+        surrounding document's/style's RTL default."""
+        from docx.oxml.ns import qn
+
+        pages = [
+            PageAST(
+                page_number=1,
+                nodes=[
+                    ASTNode(
+                        type=LayoutType.paragraph, text="این یک پاراگراف فارسی است"
+                    ),
+                    ASTNode(
+                        type=LayoutType.paragraph,
+                        text="This is a fully English paragraph with no Persian at all.",
+                    ),
+                ],
+            )
+        ]
+        doc_ast = DocumentAST(pages=pages)
+
+        doc = _open(render_docx(doc_ast))
+
+        english_p = next(
+            p for p in doc.paragraphs if p.text.startswith("This is a fully English")
+        )
+        p_pr = english_p._p.find(qn("w:pPr"))
+        bidi = p_pr.find(qn("w:bidi"))
+        assert bidi is not None
+        assert bidi.get(qn("w:val")) == "0"
+        assert english_p.alignment == WD_ALIGN_PARAGRAPH.LEFT
+        rpr = p_pr.find(qn("w:rPr"))
+        assert rpr.find(qn("w:rtl")).get(qn("w:val")) == "0"
+        assert rpr.find(qn("w:lang")).get(qn("w:val")) == "en-US"
+
+    def test_all_persian_paragraph_still_renders_rtl(self) -> None:
+        """No regression to the existing, correct all-Persian behavior."""
+        from docx.oxml.ns import qn
+
+        text = "این یک پاراگراف فارسی کامل است"
+        node = ASTNode(type=LayoutType.paragraph, text=text)
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        doc = _open(render_docx(doc_ast))
+
+        p = next(p for p in doc.paragraphs if p.text == text)
+        p_pr = p._p.find(qn("w:pPr"))
+        bidi = p_pr.find(qn("w:bidi"))
+        assert bidi is not None
+        assert bidi.get(qn("w:val")) == "1"
+        assert _jc_val(p) == "start"
+
+    def test_paragraph_exactly_at_20_percent_boundary_counts_as_rtl(self) -> None:
+        """
+        "20% or more" is inclusive -- a paragraph with exactly 20% of its
+        alphabetic characters in an RTL range must still resolve to RTL."""
+        from docx.oxml.ns import qn
+
+        # 1 Persian letter + 4 Latin letters = 5 alphabetic chars -> 1/5 = 20%.
+        text = "سabcd"
+        node = ASTNode(type=LayoutType.paragraph, text=text)
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        doc = _open(render_docx(doc_ast))
+
+        p = next(p for p in doc.paragraphs if p.text == text)
+        bidi = p._p.find(qn("w:pPr")).find(qn("w:bidi"))
+        assert bidi is not None
+        assert bidi.get(qn("w:val")) == "1"
+
+    def test_paragraph_just_under_20_percent_boundary_counts_as_ltr(self) -> None:
+        from docx.oxml.ns import qn
+
+        # 1 Persian letter + 5 Latin letters = 6 alphabetic chars -> 1/6 < 20%.
+        text = "سabcde"
+        node = ASTNode(type=LayoutType.paragraph, text=text)
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        doc = _open(render_docx(doc_ast))
+
+        p = next(p for p in doc.paragraphs if p.text == text)
+        bidi = p._p.find(qn("w:pPr")).find(qn("w:bidi"))
+        assert bidi is not None
+        assert bidi.get(qn("w:val")) == "0"
+
+    def test_paragraph_with_zero_alphabetic_chars_does_not_crash_and_defaults_ltr(
+        self,
+    ) -> None:
+        """
+        A paragraph made up only of digits/punctuation/whitespace (no
+        alphabetic characters at all) must not crash the ratio
+        computation, and defaults to LTR (documented default -- see
+        docx._rtl_ratio's docstring)."""
+        from docx.oxml.ns import qn
+
+        text = "42 100 200 -- 2026"
+        node = ASTNode(type=LayoutType.paragraph, text=text)
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        doc = _open(render_docx(doc_ast))  # must not raise
+
+        p = next(p for p in doc.paragraphs if p.text == text)
+        bidi = p._p.find(qn("w:pPr")).find(qn("w:bidi"))
+        assert bidi is not None
+        assert bidi.get(qn("w:val")) == "0"
+
+    def test_table_cell_direction_is_judged_per_cell_not_per_table(self) -> None:
+        """
+        A genuinely mixed table (an English column next to a Persian
+        column) must judge each cell's direction independently, not force
+        every cell into whichever language happens to dominate the table
+        overall."""
+        from docx.oxml.ns import qn
+
+        node = ASTNode(
+            type=LayoutType.table,
+            rows=[["Name", "نام"], ["Alice", "علی"]],
+        )
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        doc = _open(render_docx(doc_ast))
+
+        table = doc.tables[0]
+        english_cell_p = table.cell(1, 0).paragraphs[0]
+        persian_cell_p = table.cell(1, 1).paragraphs[0]
+
+        english_bidi = english_cell_p._p.find(qn("w:pPr")).find(qn("w:bidi"))
+        persian_bidi = persian_cell_p._p.find(qn("w:pPr")).find(qn("w:bidi"))
+
+        assert english_bidi.get(qn("w:val")) == "0"
+        assert persian_bidi.get(qn("w:val")) == "1"
+
+    def test_chart_data_table_cells_are_judged_per_cell_too(self, tmp_path) -> None:
+        """
+        Regression: `_add_chart`'s own auxiliary Label/Value data table is
+        a second table-building code path, separate from `_add_table`,
+        and was initially missed by this fix -- an all-English chart's
+        data table stayed forced-RTL/right-aligned even after body
+        paragraphs and regular tables were correctly fixed."""
+        from docx.oxml.ns import qn
+
+        img_path = tmp_path / "chart.png"
+        Image.new("RGB", (50, 50), "white").save(img_path)
+        node = ASTNode(
+            type=LayoutType.chart,
+            asset_path=str(img_path),
+            chart_data={
+                "data": [
+                    {"label": "Revenue", "value": "Q1"},
+                    {"label": "درآمد", "value": "س۱"},
+                ]
+            },
+        )
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        doc = _open(render_docx(doc_ast))
+
+        table = doc.tables[0]
+        english_cell_p = table.cell(1, 0).paragraphs[0]
+        persian_cell_p = table.cell(2, 0).paragraphs[0]
+
+        english_bidi = english_cell_p._p.find(qn("w:pPr")).find(qn("w:bidi"))
+        persian_bidi = persian_cell_p._p.find(qn("w:pPr")).find(qn("w:bidi"))
+
+        assert english_bidi is not None
+        assert english_bidi.get(qn("w:val")) == "0"
+        assert persian_bidi is not None
+        assert persian_bidi.get(qn("w:val")) == "1"
+
+
 _WML_XSD_CANDIDATES = [
     "/home/mahdi/.grok/skills/docx/scripts/office/schemas/ISO-IEC29500-4_2016/wml.xsd",
 ]
@@ -817,6 +1003,40 @@ class TestParagraphAlignment:
         assert matching[0].alignment == WD_ALIGN_PARAGRAPH.CENTER
 
     def test_off_center_bbox_stays_right_aligned(self) -> None:
+        """
+        Persian text (RTL) at an off-center bbox: "right"-default alignment
+        must be converted to the logical "start" value (see
+        _use_logical_alignment)."""
+        node = ASTNode(
+            type=LayoutType.paragraph, text="سمت راست است", bbox=(700, 0, 950, 30)
+        )
+        page = PageAST(page_number=1, nodes=[node], page_width=1000, page_height=1400)
+        doc_ast = DocumentAST(pages=[page])
+
+        doc = _open(render_docx(doc_ast))
+
+        matching = [p for p in doc.paragraphs if p.text == "سمت راست است"]
+        assert matching
+        assert _jc_val(matching[0]) == "start"
+
+    def test_missing_bbox_defaults_to_right_aligned(self) -> None:
+        """Persian text (RTL) with no bbox: same "right" -> "start" conversion."""
+        node = ASTNode(type=LayoutType.paragraph, text="بدون کادر است")
+        doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        doc = _open(render_docx(doc_ast))
+
+        matching = [p for p in doc.paragraphs if p.text == "بدون کادر است"]
+        assert matching
+        assert _jc_val(matching[0]) == "start"
+
+    def test_off_center_bbox_english_text_is_left_aligned(self) -> None:
+        """
+        Regression: the same off-center-bbox "right"-by-default paragraph,
+        but with English content, must end up physically "left" aligned --
+        not "start" (that's the RTL-only conversion) and not left at
+        "right" (the RTL-body-text assumption this renderer's alignment
+        default is built on)."""
         node = ASTNode(
             type=LayoutType.paragraph, text="right side", bbox=(700, 0, 950, 30)
         )
@@ -827,17 +1047,17 @@ class TestParagraphAlignment:
 
         matching = [p for p in doc.paragraphs if p.text == "right side"]
         assert matching
-        assert _jc_val(matching[0]) == "start"
+        assert _jc_val(matching[0]) == "left"
 
-    def test_missing_bbox_defaults_to_right_aligned(self) -> None:
-        node = ASTNode(type=LayoutType.paragraph, text="no bbox")
+    def test_missing_bbox_english_text_is_left_aligned(self) -> None:
+        node = ASTNode(type=LayoutType.paragraph, text="no bbox here")
         doc_ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
 
         doc = _open(render_docx(doc_ast))
 
-        matching = [p for p in doc.paragraphs if p.text == "no bbox"]
+        matching = [p for p in doc.paragraphs if p.text == "no bbox here"]
         assert matching
-        assert _jc_val(matching[0]) == "start"
+        assert _jc_val(matching[0]) == "left"
 
 
 @pytest.mark.document_intelligence

@@ -218,6 +218,7 @@ class DocumentIntelligencePipeline:
         padding_ratio: float | None = None,
         iou_threshold: float | None = None,
         max_concurrent_vlm: int | None = None,
+        max_concurrent_pages: int | None = None,
         vlm_model: str | None = None,
         openrouter_client: object | None = None,
         output_dir: str | Path | None = None,
@@ -260,6 +261,23 @@ class DocumentIntelligencePipeline:
             if max_concurrent_vlm is not None
             else Settings.ocr_di_max_concurrent_vlm
         )
+        # Bounds how many pages may be processed "in flight" concurrently.
+        # Layout detection itself stays serialized per document (see
+        # ``_detect_layout`` / ``_layout_lock`` below -- the underlying
+        # PaddleX predictor is not safe for concurrent inference calls on one
+        # shared instance), but this lets each page's downstream VLM/HTTP
+        # element-extraction step overlap with other pages' layout detection
+        # and VLM calls instead of the whole document running strictly
+        # page-by-page.
+        self.max_concurrent_pages = (
+            max_concurrent_pages
+            if max_concurrent_pages is not None
+            else Settings.ocr_di_max_concurrent_pages
+        )
+        # Serializes calls into the shared LayoutDetector instance across
+        # concurrently-running pages of *this* document -- see
+        # ``_detect_layout`` for why that's necessary.
+        self._layout_lock = asyncio.Lock()
 
     async def process(
         self,
@@ -289,6 +307,16 @@ class DocumentIntelligencePipeline:
         completes and reuses any checkpoint left by a previous, crashed run
         of the same task instead of reprocessing that page -- see
         ``_page_to_checkpoint`` for what is (and isn't) preserved.
+
+        Pages run with bounded concurrency (``self.max_concurrent_pages``):
+        layout detection is serialized across pages (one shared
+        ``LayoutDetector`` instance, not safe for concurrent inference calls
+        -- see ``_detect_layout``), but each page's VLM/HTTP element
+        extraction overlaps with other pages' layout detection and VLM
+        calls, so wall-clock time is no longer ``sum(page_time)``.
+        ``completed_pages`` passed to ``on_page_done`` therefore reflects
+        pages finished so far (completion order), not submission order --
+        still monotonic, never double-counted, never regresses.
         """
         t_start = time.time()
         file_bytes.seek(0)
@@ -299,52 +327,69 @@ class DocumentIntelligencePipeline:
             await checkpoint_store.load_pages(task_uid) if task_uid else {}
         )
 
-        page_asts: list[PageAST] = []
-        page_stats: list[PageStats] = []
-        for page in document.pages:
+        page_semaphore = asyncio.Semaphore(max(1, self.max_concurrent_pages))
+        completed_lock = asyncio.Lock()
+        completed_count = 0
+        page_results: list[tuple[PageAST, PageStats] | None] = [None] * total_pages
+
+        async def _run_page(index: int, page: Page) -> None:
+            nonlocal completed_count
+
             cached = checkpoints.get(page.page_number)
             if cached is not None:
                 page_ast, page_stat = _page_from_checkpoint(cached)
             else:
-                try:
-                    page_ast, page_stat = await self._process_page(page)
-                except Exception:
-                    # Each element call already retries transient failures (see
-                    # ElementProcessor._call_with_retry); reaching here means
-                    # retries were exhausted. A single unlucky page must not
-                    # discard every other page's already-completed work in a
-                    # potentially hours-long, thousand-call job -- isolate the
-                    # failure to this page and keep going.
-                    logger.exception(
-                        "Page %d failed after retries; skipping it, continuing",
-                        page.page_number,
-                    )
-                    page_ast = PageAST(page_number=page.page_number, nodes=[])
-                    page_stat = PageStats(
-                        page_number=page.page_number,
-                        layout_time=0.0,
-                        vlm_time=0.0,
-                        failed=True,
-                        error="processing failed after retries",
-                    )
+                async with page_semaphore:
+                    try:
+                        page_ast, page_stat = await self._process_page(page)
+                    except Exception:
+                        # Each element call already retries transient failures
+                        # (see ElementProcessor._call_with_retry); reaching
+                        # here means retries were exhausted. A single unlucky
+                        # page must not discard every other page's
+                        # already-completed work in a potentially
+                        # hours-long, thousand-call job -- isolate the
+                        # failure to this page and keep going.
+                        logger.exception(
+                            "Page %d failed after retries; skipping it, continuing",
+                            page.page_number,
+                        )
+                        page_ast = PageAST(page_number=page.page_number, nodes=[])
+                        page_stat = PageStats(
+                            page_number=page.page_number,
+                            layout_time=0.0,
+                            vlm_time=0.0,
+                            failed=True,
+                            error="processing failed after retries",
+                        )
                 if task_uid:
                     await checkpoint_store.save_page(
                         task_uid,
                         page.page_number,
                         _page_to_checkpoint(page_ast, page_stat),
                     )
-            page_asts.append(page_ast)
-            page_stats.append(page_stat)
+            page_results[index] = (page_ast, page_stat)
+
+            async with completed_lock:
+                completed_count += 1
+                current = completed_count
 
             if on_page_done is not None:
                 try:
-                    await on_page_done(len(page_asts), total_pages)
+                    await on_page_done(current, total_pages)
                 except Exception:
                     logger.exception(
                         "Progress callback failed on page %d/%d; continuing",
-                        len(page_asts),
+                        current,
                         total_pages,
                     )
+
+        await asyncio.gather(
+            *(_run_page(i, page) for i, page in enumerate(document.pages))
+        )
+
+        page_asts = [result[0] for result in page_results if result is not None]
+        page_stats = [result[1] for result in page_results if result is not None]
 
         asset_map = {a.path: a.rel_path for a in self.asset_manager.get_assets()}
         document_ast = build_document_ast(page_asts, asset_map)
@@ -384,9 +429,31 @@ class DocumentIntelligencePipeline:
             document_ast=document_ast,
         )
 
+    async def _detect_layout(self, page: Page) -> list[LayoutElement]:
+        """
+        Run layout detection for one page, off the event loop and serialized.
+
+        ``LayoutDetector.detect`` is a synchronous, blocking call into a
+        PaddleX predictor (see ``layout.py``): ``BasePredictor.__call__``
+        mutates shared, unsynchronized instance state (e.g.
+        ``self.batch_sampler.batch_size``) on every invocation, and
+        ``LayoutDetector._get_model`` lazily populates a plain (unlocked)
+        dict the first time each model is used. Neither is safe to call
+        concurrently from multiple threads/coroutines against the one
+        ``LayoutDetector`` instance this pipeline owns, so calls are
+        serialized with ``self._layout_lock`` -- moving the work to a
+        thread (``asyncio.to_thread``) still keeps the event loop free for
+        *other* pages' VLM/HTTP calls to overlap with whichever page
+        currently holds the lock.
+        """
+        async with self._layout_lock:
+            return await asyncio.to_thread(
+                self.layout_detector.detect, page.image, page
+            )
+
     async def _process_page(self, page: Page) -> tuple[PageAST, PageStats]:
         t0 = time.time()
-        layout_elements = self.layout_detector.detect(page.image, page)
+        layout_elements = await self._detect_layout(page)
         layout_time = time.time() - t0
 
         if not layout_elements:
@@ -473,6 +540,16 @@ class DocumentIntelligencePipeline:
                 len(p.elements),
             )
         logger.info("Render: %.2fs, total: %.2fs", stats.render_time, stats.total_time)
+        sequential_estimate = sum(p.layout_time + p.vlm_time for p in stats.pages)
+        logger.info(
+            "Concurrency check: %d pages, wall-clock=%.2fs, "
+            "sum-of-page-times=%.2fs, max_concurrent_pages=%d "
+            "(wall-clock well under the sum confirms pages overlapped)",
+            len(stats.pages),
+            stats.total_time,
+            sequential_estimate,
+            self.max_concurrent_pages,
+        )
 
     def cleanup(self) -> None:
         """

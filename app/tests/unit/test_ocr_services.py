@@ -1,6 +1,10 @@
 """Unit tests for OCR services."""
 
+import asyncio
+import time
 from io import BytesIO
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -598,3 +602,158 @@ class TestResumeStuckOcrTasks:
             await resume_stuck_ocr_tasks()
 
         mock_process.assert_not_called()
+
+
+def _fake_task() -> SimpleNamespace:
+    return SimpleNamespace(
+        uid="t1",
+        user_id="u1",
+        workspace_id=None,
+        save_report=AsyncMock(),
+        result=None,
+        task_status=None,
+        usage_amount=None,
+        usage_id=None,
+        provider_meta=None,
+    )
+
+
+def _fake_di_result(tmp_path: Path, assets: list) -> SimpleNamespace:
+    out_dir = tmp_path / "out"
+    out_dir.mkdir(exist_ok=True)
+    return SimpleNamespace(
+        markdown="di-md",
+        assets=assets,
+        docx_bytes=b"PK",
+        output_dir=out_dir,
+        stats={},
+    )
+
+
+@pytest.mark.unit
+class TestDocumentIntelligenceAssetUploadConcurrency:
+    """
+    Document Intelligence asset uploads must run with bounded concurrency,
+    not one-at-a-time -- see ``_process_with_document_intelligence``.
+    """
+
+    async def _run_with_assets(
+        self, tmp_path: Path, assets: list, upload_file_mock: AsyncMock
+    ):
+        from apps.ocr import services as svc
+        from apps.ocr.schemas import OcrEngineType
+
+        di = MagicMock()
+        di.process = AsyncMock(return_value=_fake_di_result(tmp_path, assets))
+        di.cleanup = MagicMock()
+        di.output_dir = tmp_path / "di"
+        usage = SimpleNamespace(amount=1.0, uid="usage1")
+
+        with (
+            patch("apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=1),
+            patch("apps.ocr.services.finance.check_quota", AsyncMock(return_value=10)),
+            patch(
+                "apps.ocr.document_intelligence.DocumentIntelligencePipeline",
+                return_value=di,
+            ),
+            patch("apps.ocr.document_intelligence.summarize_stats", return_value={}),
+            patch(
+                "apps.ocr.document_intelligence.renderers.markdown.rewrite_asset_links",
+                side_effect=lambda markdown, url_map: markdown,
+            ) as rewrite_mock,
+            patch("utils.integrations.media.upload_file", upload_file_mock),
+            patch("apps.ocr.services.finance.estimate_ocr_cost", return_value=1.0),
+            patch(
+                "apps.ocr.services.finance.meter_cost", AsyncMock(return_value=usage)
+            ),
+            patch("apps.ocr.services.texttools.normalize_text", return_value="di-md"),
+        ):
+            out = await svc._process_with_document_intelligence(
+                _fake_task(),
+                BytesIO(b"%PDF"),
+                "application/pdf",
+                OcrEngineType.document_intelligence,
+            )
+        return out, rewrite_mock
+
+    @pytest.mark.asyncio
+    async def test_assets_upload_concurrently_not_serially(
+        self, tmp_path: Path
+    ) -> None:
+        """
+        N asset uploads that each take ``delay`` seconds should finish in
+        roughly one ``delay``-sized wave (plus the docx upload's own
+        ``delay``), not ``N * delay`` -- proving the upload loop is no
+        longer a plain sequential ``for asset in result.assets: await ...``.
+        """
+        n_assets = 6
+        delay = 0.12
+        assets = []
+        for i in range(n_assets):
+            path = tmp_path / f"asset{i}.png"
+            path.write_bytes(b"img")
+            assets.append(
+                SimpleNamespace(path=str(path), rel_path=f"assets/asset{i}.png")
+            )
+
+        async def slow_upload_file(buf, *, user_id, workspace_id=None):
+            await asyncio.sleep(delay)
+            return "https://media/ok"
+
+        start = time.monotonic()
+        out, _ = await self._run_with_assets(
+            tmp_path, assets, AsyncMock(side_effect=slow_upload_file)
+        )
+        elapsed = time.monotonic() - start
+
+        assert out.result == "di-md"
+        # Fully serial would be (n_assets + 1 docx) * delay. Concurrent
+        # uploads plus one sequential docx upload should land near 2*delay.
+        serial_time = (n_assets + 1) * delay
+        assert elapsed < serial_time * 0.6, (
+            f"elapsed={elapsed:.3f}s not much faster than serial={serial_time:.3f}s "
+            "-- asset uploads look serialized"
+        )
+
+    @pytest.mark.asyncio
+    async def test_one_failed_asset_upload_does_not_abort_others(
+        self, tmp_path: Path
+    ) -> None:
+        """A single asset failing to upload must not drop the others."""
+        good_a = tmp_path / "good_a.png"
+        good_a.write_bytes(b"img")
+        bad = tmp_path / "bad.png"
+        bad.write_bytes(b"img")
+        good_b = tmp_path / "good_b.png"
+        good_b.write_bytes(b"img")
+
+        assets = [
+            SimpleNamespace(path=str(good_a), rel_path="assets/good_a.png"),
+            SimpleNamespace(path=str(bad), rel_path="assets/bad.png"),
+            SimpleNamespace(path=str(good_b), rel_path="assets/good_b.png"),
+        ]
+
+        # All three assets have identical content, so the only reliable way
+        # to make exactly one fail deterministically (regardless of
+        # completion order under concurrency) is by call count.
+        call_count = 0
+
+        async def _side_effect(buf, *, user_id, workspace_id=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                error = RuntimeError("upload failed")
+                raise error
+            return f"https://media/ok-{call_count}"
+
+        upload_mock = AsyncMock(side_effect=_side_effect)
+
+        out, rewrite_mock = await self._run_with_assets(tmp_path, assets, upload_mock)
+
+        assert out.result == "di-md"
+        rewrite_mock.assert_called_once()
+        (_markdown, url_map), _kwargs = rewrite_mock.call_args
+        # Exactly one of the three assets failed; the other two must still
+        # have made it into the url_map (per-asset failure isolation, now
+        # under concurrency).
+        assert len(url_map) == 2

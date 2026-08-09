@@ -88,6 +88,49 @@ Introductory paragraph.
         assert text.count("Merged heading") == 1
         assert text.count("Row span") == 1
 
+    def test_wide_table_with_long_cells_stays_within_page_bounds(self) -> None:
+        """
+        A many-column table with long unbreakable values must not overflow.
+
+        Regression, reported against a real 12-column bank statement
+        export: ``table { width: 100% }`` alone doesn't cap width under
+        auto table layout -- WeasyPrint (like browsers) sizes each column
+        from its own content's natural width first, and the sum across
+        many columns exceeded the page's printable width, pushing the
+        table (and every cell after the first few columns) off the page.
+        table-layout: fixed + overflow-wrap on cells fixes this by capping
+        the table at its declared width and letting long values wrap.
+        """
+        header = [
+            "تاریخ و زمان تراکنش", "نوع تراکنش", "مبلغ", "مانده حساب", "ارز",
+            "شماره مرجع", "کد شعبه", "نام شعبه", "نام درخواست‌کننده",
+            "نام خانوادگی", "کد هویتی",
+        ]
+        row = [
+            "2026-02-18 11:46:37", "CREDIT (واریز)", "1.03", "501.03", "EUR",
+            "17297581.0", "60.0", "مرکزی", "هژیر", "بی طوشی", "2872050256.0",
+        ]
+        table = ASTNode(type=LayoutType.table, rows=[header, row, row, row])
+        ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[table])])
+
+        pdf = fitz.open(stream=render_pdf(ast).getvalue(), filetype="pdf")
+        page = pdf[0]
+        # Neither the table's own borders/cell backgrounds (vector paths)
+        # nor any text run may extend past the physical page -- table-
+        # layout: fixed caps the table's box at its declared 100% width
+        # regardless of what the columns' natural content widths wanted.
+        for drawing in page.get_drawings():
+            assert drawing["rect"].x1 <= page.rect.width + 1, (
+                f"table border/fill extends past the page edge: {drawing['rect']}"
+            )
+        for block in page.get_text("dict")["blocks"]:
+            if "lines" not in block:
+                continue
+            x1 = block["bbox"][2]
+            assert x1 <= page.rect.width + 1, (
+                f"text block extends past the page edge: {block['bbox']}"
+            )
+
     def test_formula_fallback_code_and_optional_nodes_do_not_crash(self) -> None:
         nodes = [
             ASTNode(type=LayoutType.formula, html="x &lt; y"),

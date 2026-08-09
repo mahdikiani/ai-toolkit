@@ -247,11 +247,18 @@ def _document_html(ast: DocumentAST) -> str:
     li {{ margin: 0.15em 0; }}
     table {{
       width: 100%;
+      table-layout: fixed;
       border-collapse: collapse;
       margin: 0.8em 0;
       break-inside: avoid;
     }}
-    th, td {{ border: 1px solid #777; padding: 0.35em 0.5em; text-align: right; }}
+    th, td {{
+      border: 1px solid #777;
+      padding: 0.35em 0.5em;
+      text-align: right;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
     th {{ background: #eeeeee; font-weight: 700; }}
     .caption {{ color: #444; }}
     pre, .formula {{

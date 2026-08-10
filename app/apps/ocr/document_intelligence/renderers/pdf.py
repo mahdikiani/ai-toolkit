@@ -240,10 +240,16 @@ def _render_figure_or_chart(node: ASTNode) -> str:
         if description.strip()
         else ""
     )
+    # A bare <img> has no dir/text-align of its own, so it inherits the
+    # document's dir="rtl" body and lands flush-right instead of centered
+    # (the same visual assumption _add_image in docx.py makes explicit via
+    # WD_ALIGN_PARAGRAPH.CENTER) -- wrap it in an explicitly centered <p>
+    # so narrower-than-page images/charts read the same way in both formats.
     image_uri = _image_data_uri(node.asset_path)
     image = (
+        '<p style="text-align: center;">'
         f'<img src="{image_uri}" style="max-width: 100%; height: auto;" '
-        f'alt="{escape(description, quote=True)}">'
+        f'alt="{escape(description, quote=True)}"></p>'
         if image_uri
         else ""
     )

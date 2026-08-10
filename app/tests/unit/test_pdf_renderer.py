@@ -4,11 +4,16 @@ from io import BytesIO
 
 import fitz
 import pytest
+from PIL import Image
 
 from apps.ocr.document_intelligence.ast import ASTNode, DocumentAST, PageAST
 from apps.ocr.document_intelligence.layout import LayoutType
 from apps.ocr.document_intelligence.markdown_parser import parse_markdown
-from apps.ocr.document_intelligence.renderers.pdf import _render_table, render_pdf
+from apps.ocr.document_intelligence.renderers.pdf import (
+    _render_node,
+    _render_table,
+    render_pdf,
+)
 
 
 def _open_pdf(markdown: str) -> fitz.Document:
@@ -183,6 +188,72 @@ Introductory paragraph.
         assert "if x < y:" in text
         assert "Figure caption" in text
         assert "Skipped header" not in text
+
+    def test_valid_latex_formula_renders_as_an_image(self) -> None:
+        formula = ASTNode(type=LayoutType.formula, latex=r"x^2 + y^2 = z^2")
+        ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[formula])])
+
+        pdf = fitz.open(stream=render_pdf(ast).getvalue(), filetype="pdf")
+        page = pdf[0]
+
+        assert page.get_images()
+        assert "x^2" not in page.get_text()
+
+    def test_invalid_latex_formula_falls_back_to_literal_text(self) -> None:
+        malformed_latex = r"\frac{1}{"
+        formula = ASTNode(type=LayoutType.formula, latex=malformed_latex)
+        ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[formula])])
+
+        pdf = fitz.open(stream=render_pdf(ast).getvalue(), filetype="pdf")
+        page = pdf[0]
+
+        assert not page.get_images()
+        assert malformed_latex in page.get_text()
+
+    def test_empty_latex_formula_still_uses_existing_html_fallback(self) -> None:
+        formula = ASTNode(type=LayoutType.formula, html="x &lt; y")
+        ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[formula])])
+
+        pdf = fitz.open(stream=render_pdf(ast).getvalue(), filetype="pdf")
+
+        assert "x &lt; y" in pdf[0].get_text()
+
+    @pytest.mark.parametrize("node_type", [LayoutType.figure, LayoutType.chart])
+    def test_figure_and_chart_assets_render_as_images(
+        self, tmp_path, node_type: LayoutType
+    ) -> None:
+        image_path = tmp_path / f"{node_type.value}.png"
+        Image.new("RGB", (40, 30), "blue").save(image_path)
+        node = ASTNode(
+            type=node_type,
+            asset_path=str(image_path),
+            caption=f"{node_type.value} caption",
+        )
+        ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        pdf = fitz.open(stream=render_pdf(ast).getvalue(), filetype="pdf")
+        fragment = _render_node(node)
+
+        assert pdf[0].get_images()
+        assert f"{node_type.value} caption" in pdf[0].get_text()
+        assert fragment.index("<img") < fragment.index('<p class="caption"')
+
+    def test_missing_figure_asset_keeps_caption_without_broken_image(
+        self, tmp_path
+    ) -> None:
+        node = ASTNode(
+            type=LayoutType.figure,
+            asset_path=str(tmp_path / "missing.png"),
+            caption="Missing figure caption",
+        )
+        ast = DocumentAST(pages=[PageAST(page_number=1, nodes=[node])])
+
+        pdf = fitz.open(stream=render_pdf(ast).getvalue(), filetype="pdf")
+
+        assert not pdf[0].get_images()
+        assert "Missing figure caption" in pdf[0].get_text()
+        assert "<img" not in _render_node(node)
+        assert _render_node(ASTNode(type=LayoutType.figure)) == ""
 
     def test_empty_and_malformed_tables_are_ignored_safely(self) -> None:
         empty = ASTNode(type=LayoutType.table)

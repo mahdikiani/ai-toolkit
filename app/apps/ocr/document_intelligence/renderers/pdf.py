@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import base64
+import logging
+import mimetypes
 from html import escape
 from io import BytesIO
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 from weasyprint import HTML
 
 from ..ast import ASTNode, DocumentAST
 from ..inline_markdown import parse_inline_segments
 from ..layout import LayoutType
+
+logger = logging.getLogger(__name__)
 
 _FONT_DIR = Path(__file__).with_name("fonts")
 _REGULAR_FONT = _FONT_DIR / "IRNazanin-Regular.ttf"
@@ -58,6 +67,57 @@ def _font_data_uri(path: Path) -> str:
     """Return a self-contained font URL understood by WeasyPrint."""
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:font/ttf;base64,{encoded}"
+
+
+def _image_data_uri(asset_path: str) -> str | None:
+    """Return an embedded image URL, or ``None`` for an unreadable asset."""
+    if not asset_path or not Path(asset_path).exists():
+        return None
+
+    try:
+        image_bytes = Path(asset_path).read_bytes()
+    except Exception:
+        return None
+
+    mime_type = mimetypes.guess_type(asset_path)[0] or "image/png"
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _render_latex_to_png(
+    latex: str, *, fontsize: int = 16, dpi: int = 200
+) -> bytes:
+    """Typeset raw LaTeX mathtext into a tightly cropped PNG."""
+    fig = plt.figure()
+    try:
+        fig.text(0.5, 0.5, f"${latex}$", fontsize=fontsize, ha="center", va="center")
+        buf = BytesIO()
+        fig.savefig(
+            buf,
+            format="png",
+            dpi=dpi,
+            transparent=True,
+            bbox_inches="tight",
+            pad_inches=0.05,
+        )
+        buf.seek(0)
+        return buf.read()
+    finally:
+        plt.close(fig)
+
+
+def _formula_image_data_uri(latex: str) -> str | None:
+    """Return a PNG data URL for LaTeX, falling back safely on parse errors."""
+    try:
+        png_bytes = _render_latex_to_png(latex)
+    except Exception:
+        logger.warning(
+            "Formula LaTeX rendering failed, falling back to text: %r", latex
+        )
+        return None
+
+    encoded = base64.b64encode(png_bytes).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
 def _render_inline(text: str) -> str:
@@ -151,6 +211,51 @@ def _render_table(node: ASTNode) -> str:
     return f"<table>{head}{body}</table>"
 
 
+def _render_formula(node: ASTNode) -> str:
+    """Render a block formula as mathtext, preserving the text fallback."""
+    if node.latex.strip():
+        image_uri = _formula_image_data_uri(node.latex)
+        if image_uri:
+            alt_text = escape(node.latex, quote=True)
+            return (
+                '<div class="formula" dir="ltr">'
+                f'<img class="formula-image" src="{image_uri}" '
+                f'alt="{alt_text}"></div>'
+            )
+
+    formula = node.latex or node.html or node.text
+    return (
+        f'<div class="formula" dir="ltr">{escape(formula)}</div>'
+        if formula.strip()
+        else ""
+    )
+
+
+def _render_figure_or_chart(node: ASTNode) -> str:
+    """Render an available image before the existing caption fragment."""
+    description = node.caption or node.text
+    caption = (
+        f'<p class="caption" dir="{_base_dir(description)}">'
+        f"<em>{_render_inline(description)}</em></p>"
+        if description.strip()
+        else ""
+    )
+    # A bare <img> has no dir/text-align of its own, so it inherits the
+    # document's dir="rtl" body and lands flush-right instead of centered
+    # (the same visual assumption _add_image in docx.py makes explicit via
+    # WD_ALIGN_PARAGRAPH.CENTER) -- wrap it in an explicitly centered <p>
+    # so narrower-than-page images/charts read the same way in both formats.
+    image_uri = _image_data_uri(node.asset_path)
+    image = (
+        '<p style="text-align: center;">'
+        f'<img src="{image_uri}" style="max-width: 100%; height: auto;" '
+        f'alt="{escape(description, quote=True)}"></p>'
+        if image_uri
+        else ""
+    )
+    return image + caption
+
+
 def _render_node(node: ASTNode) -> str:
     """Map one AST node type to one HTML fragment."""
     if node.type == LayoutType.title:
@@ -179,22 +284,11 @@ def _render_node(node: ASTNode) -> str:
     if node.type == LayoutType.table:
         return _render_table(node)
     if node.type == LayoutType.formula:
-        formula = node.latex or node.html or node.text
-        return (
-            f'<div class="formula" dir="ltr">{escape(formula)}</div>'
-            if formula.strip()
-            else ""
-        )
+        return _render_formula(node)
     if node.type == LayoutType.code:
         return f'<pre dir="ltr"><code>{escape(node.text)}</code></pre>'
     if node.type in {LayoutType.figure, LayoutType.chart}:
-        description = node.caption or node.text
-        return (
-            f'<p class="caption" dir="{_base_dir(description)}">'
-            f"<em>{_render_inline(description)}</em></p>"
-            if description.strip()
-            else ""
-        )
+        return _render_figure_or_chart(node)
     # Header, footer, and page number are deliberately absent from the plain v1 PDF.
     return ""
 
@@ -274,6 +368,7 @@ def _document_html(ast: DocumentAST) -> str:
       margin: 0.7em 0;
     }}
     .formula {{ font-style: italic; text-align: center; }}
+    .formula img {{ max-width: 100%; height: auto; }}
     .inline-code, .inline-formula {{
       direction: ltr;
       unicode-bidi: isolate;

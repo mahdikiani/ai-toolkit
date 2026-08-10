@@ -54,6 +54,34 @@ class TestGdriveHelpers:
         token = gdrive.parse_large_file_confirm_token('href="/uc?confirm=abc123"')
         assert token == "abc123"
 
+    def test_parse_confirm_download_form(self) -> None:
+        """
+        Regression test: real "too large to scan" interstitials use a
+        <form action="..."> with hidden id/export/confirm/uuid inputs and no
+        literal "confirm=" substring anywhere on the page, so
+        parse_large_file_confirm_token alone finds nothing and the caller
+        would serve the interstitial HTML as if it were the file.
+        """
+        html = (
+            '<form id="download-form" '
+            'action="https://drive.usercontent.google.com/download" '
+            'method="get">'
+            '<input type="hidden" name="id" value="file123">'
+            '<input type="hidden" name="export" value="download">'
+            '<input type="hidden" name="confirm" value="t">'
+            '<input type="hidden" name="uuid" value="dead-beef">'
+            "</form>"
+        )
+        assert gdrive.parse_large_file_confirm_token(html) is None
+        confirm_url = gdrive.parse_confirm_download_form(html)
+        assert confirm_url == (
+            "https://drive.usercontent.google.com/download"
+            "?id=file123&export=download&confirm=t&uuid=dead-beef"
+        )
+
+    def test_parse_confirm_download_form_returns_none_without_form(self) -> None:
+        assert gdrive.parse_confirm_download_form("<p>no form here</p>") is None
+
 
 @pytest.mark.unit
 class TestMediaClient:

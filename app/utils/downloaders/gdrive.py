@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 GDRIVE_FILE_PATTERN = re.compile(
     r"https?://drive\.google\.com/file/d/([a-zA-Z0-9_-]+)",
@@ -21,6 +22,10 @@ DOCS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 CONFIRM_TOKEN_PATTERN = re.compile(r"confirm=([0-9A-Za-z_]+)")
+FORM_ACTION_PATTERN = re.compile(r'<form[^>]*\baction="([^"]+)"', re.IGNORECASE)
+FORM_INPUT_PATTERN = re.compile(
+    r'<input[^>]*\bname="([^"]+)"[^>]*\bvalue="([^"]*)"', re.IGNORECASE
+)
 
 
 def extract_gdrive_file_id(url: str) -> str | None:
@@ -56,6 +61,28 @@ def resolve_gdrive_download_url(url: str) -> str:
 
 
 def parse_large_file_confirm_token(html: str) -> str | None:
-    """Parse Drive's virus-scan confirmation token from an HTML interstitial."""
+    """Parse Drive's legacy virus-scan confirmation token (confirm= link)."""
     match = CONFIRM_TOKEN_PATTERN.search(html)
     return match.group(1) if match else None
+
+
+def parse_confirm_download_form(html: str) -> str | None:
+    """
+    Resolve Drive's *current* virus-scan interstitial via its download form.
+
+    Large files now render a ``<form action="...">`` with hidden id/export/
+    confirm/uuid inputs instead of the older ``confirm=`` query-string link
+    that parse_large_file_confirm_token expects — there's no longer a literal
+    "confirm=" substring in the page at all, so that regex silently finds
+    nothing and the caller falls through to serving the interstitial HTML as
+    if it were the file. Mirroring the form's own action + hidden fields
+    keeps this in sync with whatever parameters Drive decides to require.
+    """
+    action_match = FORM_ACTION_PATTERN.search(html)
+    if not action_match:
+        return None
+    params = FORM_INPUT_PATTERN.findall(html)
+    if not params:
+        return None
+    query = "&".join(f"{name}={quote(value, safe='')}" for name, value in params)
+    return f"{action_match.group(1)}?{query}"

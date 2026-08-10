@@ -644,6 +644,51 @@ class TestTranscriptionErrorHandling:
 
         assert result.task_status == TaskStatusEnum.error
 
+    async def test_gdrive_url_is_downloaded_and_uploaded_not_url_submitted(
+        self,
+    ) -> None:
+        """
+        Regression test: Soniox can't navigate Drive's virus-scan
+        interstitial the way download_bytes() can, so handing it a raw
+        Drive share link for URL-based transcription used to fail with
+        "Invalid audio file" even once download_bytes() itself was fixed.
+        gdrive URLs must be downloaded here and uploaded as bytes instead.
+        """
+        from io import BytesIO
+
+        from apps.transcribe.services import _process_single_job
+
+        task = MagicMock()
+        task.uid = "task_123"
+        task.file_url = "https://drive.google.com/file/d/abc123/view"
+        task.file_content = AsyncMock(return_value=BytesIO(b"fake-video-bytes"))
+        task.save = AsyncMock(return_value=task)
+
+        mock_job = MagicMock()
+        mock_job.id = "job_123"
+
+        with (
+            patch(
+                "apps.transcribe.services.check_file_type",
+                return_value="video/mp4",
+            ),
+            patch(
+                "apps.transcribe.services.soniox.transcribe_file_async",
+                new_callable=AsyncMock,
+                return_value=mock_job,
+            ) as mock_transcribe_file,
+            patch(
+                "apps.transcribe.services.soniox.transcribe_url_async",
+                new_callable=AsyncMock,
+            ) as mock_transcribe_url,
+        ):
+            result = await _process_single_job(task, sync=False)
+
+        mock_transcribe_file.assert_awaited_once()
+        mock_transcribe_url.assert_not_awaited()
+        assert mock_transcribe_file.await_args.args[0].endswith(".mp4")
+        assert result.transcription_job_id == "job_123"
+
     async def test_handles_chunk_transcription_failure(self) -> None:
         """Chunked transcription should handle individual chunk failures."""
         from pathlib import Path

@@ -11,6 +11,7 @@ from pathlib import Path
 import uvicorn
 
 from server.server import app
+from utils.version import app_version
 
 __all__ = ["app"]
 
@@ -49,6 +50,7 @@ async def main() -> None:
         )
     module = Path(__file__).stem
     port = _resolve_listen_port()
+    logging.info("AI Toolkit v%s starting", app_version())
     logging.info("Uvicorn listening on port %s", port)
     config = uvicorn.Config(
         f"{module}:app",

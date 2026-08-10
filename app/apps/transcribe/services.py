@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import math
+import mimetypes
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -22,6 +23,8 @@ from soniox.types import (
 from server.config import Settings
 from utils import conditions, texttools
 from utils.billing import finance
+from utils.downloaders.gdrive import is_gdrive_url
+from utils.files.mime import check_file_type
 
 from . import chunker_ffmpeg as chunker
 from .models import TranscribeTask
@@ -146,9 +149,17 @@ async def process_transcribe(
 async def _process_single_job(task: TranscribeTask, *, sync: bool) -> TranscribeTask:
     soniox = get_soniox_client()
     config = _build_transcription_config(task, chunk_id=None, use_webhook=True)
-    if task.file_url.startswith("data:"):
+    is_gdrive = is_gdrive_url(task.file_url)
+    if task.file_url.startswith("data:") or is_gdrive:
+        # Soniox fetches file_url itself in the URL branch below; it has no
+        # way to get past Drive's "too large to scan" HTML interstitial the
+        # way download_bytes() does, so gdrive links must be downloaded here
+        # and handed to Soniox as bytes instead of as a URL for it to fetch.
         file_content = await task.file_content()
         suffix = chunker._guess_extension(task.file_url)
+        if is_gdrive:
+            mime_type = check_file_type(file_content)
+            suffix = mimetypes.guess_extension(mime_type) or suffix
         with tempfile.NamedTemporaryFile(suffix=suffix) as tmp_file:
             tmp_file.write(file_content.getvalue())
             tmp_file.flush()

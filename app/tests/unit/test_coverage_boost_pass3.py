@@ -128,6 +128,45 @@ class TestPass3UtilsAndRoutes:
             buf = await web.download_bytes("https://drive.google.com/file/d/fid/view")
         assert buf.read() == b"ok"
 
+        # gdrive "too large to scan" form-based interstitial (regression:
+        # this page has no literal "confirm=" substring, so the confirm=
+        # link regex alone finds nothing and used to leak the HTML through
+        # as if it were the file).
+        form_page = MagicMock()
+        form_page.is_redirect = False
+        form_page.raise_for_status = MagicMock()
+        form_page.headers = {"content-type": "text/html"}
+        form_page.text = (
+            '<form action="https://drive.usercontent.google.com/download" '
+            'method="get">'
+            '<input type="hidden" name="id" value="fid">'
+            '<input type="hidden" name="export" value="download">'
+            '<input type="hidden" name="confirm" value="t">'
+            '<input type="hidden" name="uuid" value="dead-beef">'
+            "</form>"
+        )
+        form_page.content = b"html"
+        confirmed_video = MagicMock()
+        confirmed_video.raise_for_status = MagicMock()
+        confirmed_video.content = b"video-bytes"
+        client.get = AsyncMock(side_effect=[form_page, confirmed_video])
+        with (
+            patch("utils.downloaders.web.assert_safe_url"),
+            patch("utils.downloaders.web.is_gdrive_url", return_value=True),
+            patch(
+                "utils.downloaders.web.resolve_gdrive_download_url",
+                return_value="https://drive.google.com/uc?id=fid",
+            ),
+            patch("httpx.AsyncClient", return_value=client),
+        ):
+            buf = await web.download_bytes("https://drive.google.com/file/d/fid/view")
+        assert buf.read() == b"video-bytes"
+        confirm_call_url = client.get.await_args_list[1].args[0]
+        assert confirm_call_url == (
+            "https://drive.usercontent.google.com/download"
+            "?id=fid&export=download&confirm=t&uuid=dead-beef"
+        )
+
         user = SimpleNamespace(uid="u1", user_id="u1")
         assert await oc.list_models(user) == {
             "object": "list",

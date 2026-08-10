@@ -8,6 +8,7 @@ import httpx
 from .gdrive import (
     gdrive_direct_download_url,
     is_gdrive_url,
+    parse_confirm_download_form,
     parse_large_file_confirm_token,
     resolve_gdrive_download_url,
 )
@@ -49,10 +50,17 @@ async def download_bytes(url: str, *, http_timeout: float | None = 120.0) -> Byt
         if is_gdrive_url(url) and "text/html" in response.headers.get(
             "content-type", ""
         ):
-            token = parse_large_file_confirm_token(response.text)
-            if token:
-                file_id = download_url.split("id=", 1)[-1]
-                confirm_url = gdrive_direct_download_url(file_id) + f"&confirm={token}"
+            # Drive's "too large to scan" interstitial. Prefer the current
+            # form-based page; fall back to the older confirm=-link format.
+            confirm_url = parse_confirm_download_form(response.text)
+            if not confirm_url:
+                token = parse_large_file_confirm_token(response.text)
+                if token:
+                    file_id = download_url.split("id=", 1)[-1]
+                    confirm_url = (
+                        gdrive_direct_download_url(file_id) + f"&confirm={token}"
+                    )
+            if confirm_url:
                 assert_safe_url(confirm_url)
                 response = await client.get(confirm_url)
                 response.raise_for_status()

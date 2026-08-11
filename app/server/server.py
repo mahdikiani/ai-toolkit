@@ -6,6 +6,8 @@ from fastapi import APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mongo_base.core import app_factory
 
+from apps.artifacts.routes import router as artifacts_router
+from apps.converter.routes import router as artifact_convert_router
 from apps.imagination.routes import router as imagination_router
 from apps.language.chat.routes import router as chat_router
 from apps.language.promptic.routes import router as promptic_router
@@ -46,6 +48,8 @@ app.add_middleware(
 server_router = APIRouter()
 
 for router in [
+    artifacts_router,
+    artifact_convert_router,
     prompts_router,
     promptic_router,
     chat_router,

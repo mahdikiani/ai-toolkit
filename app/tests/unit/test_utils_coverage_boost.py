@@ -91,6 +91,7 @@ class TestMediaClient:
         mock_upload.raise_for_status = MagicMock()
         mock_signed = MagicMock()
         mock_signed.raise_for_status = MagicMock()
+        mock_signed.is_redirect = True
         mock_signed.headers = {"location": "https://storage/signed"}
 
         mock_client = AsyncMock()
@@ -111,6 +112,66 @@ class TestMediaClient:
             "user_id": "u1",
             "workspace_id": "w1",
         }
+
+    async def test_upload_file_durable_returns_media_uri(self) -> None:
+        mock_upload = MagicMock()
+        mock_upload.json.return_value = {"uid": "durable-1"}
+        mock_upload.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_upload)
+
+        with patch(
+            "utils.integrations.media.get_media_client",
+        ) as get_client:
+            get_client.return_value.__aenter__.return_value = mock_client
+            get_client.return_value.__aexit__.return_value = None
+            result = await media.upload_file_durable(
+                BytesIO(b"md"),
+                user_id="u1",
+                filename="note.md",
+                content_type="text/markdown",
+            )
+
+        assert result.file_uid == "durable-1"
+        assert result.storage_uri == "media:durable-1"
+        assert result.signed_url is None
+        files = mock_client.post.await_args.kwargs["files"]
+        assert files["file"][0] == "note.md"
+
+    async def test_download_by_storage_uri(self) -> None:
+        mock_signed = MagicMock()
+        mock_signed.is_redirect = True
+        mock_signed.headers = {"location": "https://storage/signed-bytes"}
+        mock_signed.raise_for_status = MagicMock()
+
+        media_client = AsyncMock()
+        media_client.get = AsyncMock(return_value=mock_signed)
+
+        content_response = MagicMock()
+        content_response.content = b"payload"
+        content_response.raise_for_status = MagicMock()
+        dl_client = AsyncMock()
+        dl_client.get = AsyncMock(return_value=content_response)
+        dl_client.__aenter__ = AsyncMock(return_value=dl_client)
+        dl_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "utils.integrations.media.get_media_client",
+            ) as get_client,
+            patch("utils.integrations.media.httpx.AsyncClient", return_value=dl_client),
+        ):
+            get_client.return_value.__aenter__.return_value = media_client
+            get_client.return_value.__aexit__.return_value = None
+            data = await media.download_by_storage_uri("media:file-9")
+
+        assert data == b"payload"
+        assert media.parse_media_uid("media:file-9") == "file-9"
+
+    def test_parse_media_uid_rejects_non_durable(self) -> None:
+        with pytest.raises(media.MediaDownloadError):
+            media.parse_media_uid("https://example.com/x")
 
 
 @pytest.mark.unit

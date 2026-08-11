@@ -1,5 +1,7 @@
 """USSO-authenticated Artifact CRUD (create + retrieve)."""
 
+import logging
+
 from fastapi import Request
 from fastapi_mongo_base.errors import BadRequestError
 from fastapi_mongo_base.schemas import BaseEntitySchema
@@ -10,6 +12,8 @@ from .enums import ArtifactFormat
 from .models import Artifact
 from .schemas import ArtifactCreate, ArtifactSchema
 from .services import create_artifact_from_text
+
+logger = logging.getLogger(__name__)
 
 
 class ArtifactRouter(usso_routes.AbstractTenantUSSORouter):
@@ -69,7 +73,7 @@ class ArtifactRouter(usso_routes.AbstractTenantUSSORouter):
                 ),
             )
 
-        return await create_artifact_from_text(
+        artifact = await create_artifact_from_text(
             text=data.content,
             artifact_format=data.format,
             user_id=user.uid,
@@ -83,6 +87,15 @@ class ArtifactRouter(usso_routes.AbstractTenantUSSORouter):
             parent_artifact_id=data.parent_artifact_id,
             meta_data=data.meta_data,
         )
+        logger.info(
+            "convert.manual_verify artifact_create id=%s format=%s source=%s "
+            "storage_uri=%s",
+            artifact.uid,
+            artifact.format.value,
+            artifact.source,
+            artifact.storage_uri,
+        )
+        return artifact
 
 
 router = ArtifactRouter().router

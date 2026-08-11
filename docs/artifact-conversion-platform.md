@@ -1,22 +1,48 @@
-# Artifact Conversion Platform (Phase 1–3)
+# Artifact Conversion Platform
 
-Status: **Phase 1 through Phase 3 landed** in `ai-toolkit` `0.1.22` (`feat/artifact-converter`).
+Status: Phase 1–3 landed; **from-media conversion tasks** added in `0.1.23`
+(`feat/artifact-converter`).
 
-## What shipped
+## Layers
 
-- **`apps/artifacts`** — durable Artifact SoR (`TenantUserEntity`). Content bytes live in Media; Mongo stores metadata + durable `storage_uri` (`media:{uid}`).
-- **`apps/converter`** — Artifact→Artifact conversion graph with a registry. First edges: `markdown→docx`, `markdown→pdf` (WeasyPrint unchanged; DI renderers imported, not redesigned).
-- **API**
-  - `POST /api/ai/v1/artifacts` — create from JSON `{format, content, title?, source?}`
-  - `GET /api/ai/v1/artifacts/{uid}`
-  - `POST /api/ai/v1/convert` — `{artifact_id, target_format}` → derived Artifact
-  - `GET /api/ai/v1/convert/formats` — registered edges
-- **Compat** — `/document-convert/*` still streams DOCX/PDF for mirza; rendering now goes through converter strategy helpers.
-- **OCR producers** — pipeline and Document Intelligence OCR persist their final Markdown as an `Artifact` with `source="ocr"` and publish its UID as `provider_meta.artifact_id`. As temporary compatibility for mirza Word delivery, both paths also build/upload DOCX and dual-write `provider_meta.docx_url` until Phase 4 clients use `convert(artifact_id)`.
+1. **`apps/artifacts`** — durable SoR (`media:{uid}`)
+2. **`POST /convert`** — sync Artifact→Artifact (client already has `artifact_id`)
+3. **`POST /conversions/from-media`** — async task: Media URI → Artifacts → webhook
 
-Patch note (`0.1.22`): completed the Phase 3 OCR ownership migration while temporarily retaining the legacy DOCX URL alongside the Artifact ID for mirza compatibility.
+## Conversion task entrypoints
 
-## Not in this wave
+| Endpoint | Status |
+|----------|--------|
+| `POST /api/ai/v1/conversions/from-media` | **Implemented** |
+| `POST /api/ai/v1/conversions/from-upload` | Deferred (security review) |
+| `POST /api/ai/v1/conversions/from-base64` | Deferred (security review) |
 
-- Phase 4: mirza (and other clients) calling `convert(artifact_id, …)`
-- PDF engine switch, DI redesign, wide format matrix
+### from-media example
+
+```json
+{
+  "source_uri": "media:FILE_UID",
+  "source_format": "markdown",
+  "target_format": "pdf",
+  "title": "گزارش",
+  "webhook_url": "https://example.com/hooks/convert"
+}
+```
+
+Also accepts Media HTTPS URLs that contain `/f/{uid}` on a Media host.
+
+Task completes with `source_artifact_id`, `result_artifact_id`, `result_storage_uri`,
+and emits webhook via TaskMixin when `webhook_url` is set.
+
+## Other APIs
+
+- `POST /api/ai/v1/artifacts`
+- `GET /api/ai/v1/artifacts/{uid}`
+- `POST /api/ai/v1/convert` — `{artifact_id, target_format}`
+- `GET /api/ai/v1/convert/formats`
+- `/document-convert/*` — legacy streaming compat for mirza
+
+## OCR
+
+Emits `provider_meta.artifact_id` and temporarily dual-writes `docx_url` until
+clients migrate to `convert(artifact_id)` / conversion tasks.

@@ -1,6 +1,6 @@
 [project]
 name = "ai-tools"
-version = "0.1.22"
+version = "0.1.23"
 description = "AI Toolkit — multi-model AI processing service: chat completions, OCR, transcription, translation, webpage extraction, YouTube transcripts, and prompt templates via OpenRouter"
 readme = "README.md"
 requires-python = ">=3.12"

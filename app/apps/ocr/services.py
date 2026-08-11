@@ -265,6 +265,11 @@ def _set_output_provider_meta(
     # Remove this dual-write once Phase 4 clients use convert(artifact_id).
     if docx_url:
         provider_meta["docx_url"] = docx_url
+    logger.info(
+        "convert.manual_verify ocr_output artifact_id=%s has_docx_url=%s",
+        artifact_id,
+        bool(docx_url),
+    )
 
 
 async def _upload_pipeline_assets(

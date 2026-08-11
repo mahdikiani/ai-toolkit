@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi_mongo_base.errors import BadRequestError
 
 from apps.artifacts.enums import EXTENSION_BY_FORMAT, MIME_BY_FORMAT, ArtifactFormat
@@ -13,6 +15,8 @@ from apps.artifacts.services import (
 )
 
 from . import registry
+
+logger = logging.getLogger(__name__)
 
 
 def _output_filename(source: Artifact, target_format: ArtifactFormat) -> str:
@@ -74,7 +78,7 @@ async def convert_artifact(
     out_bytes = edge.strategy(source_bytes, title=title)
     filename = _output_filename(source, target_format)
 
-    return await create_artifact_from_bytes(
+    derived = await create_artifact_from_bytes(
         data=out_bytes,
         filename=filename,
         content_type=MIME_BY_FORMAT[target_format],
@@ -96,6 +100,16 @@ async def convert_artifact(
             }
         },
     )
+    logger.info(
+        "convert.manual_verify source_id=%s source_format=%s "
+        "target_format=%s derived_id=%s output_bytes=%d",
+        source.uid,
+        source.format.value,
+        target_format.value,
+        derived.uid,
+        len(out_bytes),
+    )
+    return derived
 
 
 def render_markdown_to_format(

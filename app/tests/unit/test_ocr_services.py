@@ -608,7 +608,9 @@ def _fake_task() -> SimpleNamespace:
     return SimpleNamespace(
         uid="t1",
         user_id="u1",
+        tenant_id="tenant1",
         workspace_id=None,
+        meta_data=None,
         save_report=AsyncMock(),
         result=None,
         task_status=None,
@@ -631,6 +633,53 @@ def _fake_di_result(tmp_path: Path, assets: list) -> SimpleNamespace:
 
 
 @pytest.mark.unit
+class TestMarkdownArtifactEmission:
+    @pytest.mark.asyncio
+    async def test_emits_artifact_with_ocr_provenance(self) -> None:
+        from apps.artifacts.enums import ArtifactFormat
+        from apps.ocr.services import _emit_markdown_artifact
+
+        task = _fake_task()
+        task.meta_data = {"title": "Report", "original_name": "report.md"}
+        artifact = SimpleNamespace(uid="artifact-1")
+
+        with patch(
+            "apps.artifacts.services.create_artifact_from_text",
+            AsyncMock(return_value=artifact),
+        ) as create_mock:
+            artifact_id = await _emit_markdown_artifact(task, "# Report")
+
+        assert artifact_id == "artifact-1"
+        create_mock.assert_awaited_once_with(
+            text="# Report",
+            user_id="u1",
+            tenant_id="tenant1",
+            artifact_format=ArtifactFormat.markdown,
+            workspace_id=None,
+            title="Report",
+            original_name="report.md",
+            source="ocr",
+            meta_data={
+                "title": "Report",
+                "original_name": "report.md",
+                "task_uid": "t1",
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_failure_returns_none(self) -> None:
+        from apps.ocr.services import _emit_markdown_artifact
+
+        with patch(
+            "apps.artifacts.services.create_artifact_from_text",
+            AsyncMock(side_effect=RuntimeError("media unavailable")),
+        ):
+            artifact_id = await _emit_markdown_artifact(_fake_task(), "markdown")
+
+        assert artifact_id is None
+
+
+@pytest.mark.unit
 class TestDocumentIntelligenceAssetUploadConcurrency:
     """
     Document Intelligence asset uploads must run with bounded concurrency,
@@ -649,6 +698,9 @@ class TestDocumentIntelligenceAssetUploadConcurrency:
         di.output_dir = tmp_path / "di"
         usage = SimpleNamespace(amount=1.0, uid="usage1")
 
+        async def _read_in_loop(func, *args):
+            return func(*args)
+
         with (
             patch("apps.ocr.pipeline.renderer.count_pdf_bytes", return_value=1),
             patch("apps.ocr.services.finance.check_quota", AsyncMock(return_value=10)),
@@ -662,6 +714,14 @@ class TestDocumentIntelligenceAssetUploadConcurrency:
                 side_effect=lambda markdown, url_map: markdown,
             ) as rewrite_mock,
             patch("utils.integrations.media.upload_file", upload_file_mock),
+            patch(
+                "apps.ocr.services.asyncio.to_thread", side_effect=_read_in_loop
+            ),
+            patch(
+                "apps.ocr.services._emit_markdown_artifact",
+                AsyncMock(return_value="artifact-1"),
+            ),
+            patch("apps.ocr.services.checkpoint_store.clear", AsyncMock()),
             patch("apps.ocr.services.finance.estimate_ocr_cost", return_value=1.0),
             patch(
                 "apps.ocr.services.finance.meter_cost", AsyncMock(return_value=usage)
@@ -682,8 +742,8 @@ class TestDocumentIntelligenceAssetUploadConcurrency:
     ) -> None:
         """
         N asset uploads that each take ``delay`` seconds should finish in
-        roughly one ``delay``-sized wave (plus the docx upload's own
-        ``delay``), not ``N * delay`` -- proving the upload loop is no
+        roughly one ``delay``-sized wave, not ``N * delay`` -- proving the
+        upload loop is no
         longer a plain sequential ``for asset in result.assets: await ...``.
         """
         n_assets = 6
@@ -701,15 +761,15 @@ class TestDocumentIntelligenceAssetUploadConcurrency:
             return "https://media/ok"
 
         start = time.monotonic()
-        out, _ = await self._run_with_assets(
-            tmp_path, assets, AsyncMock(side_effect=slow_upload_file)
-        )
+        upload_mock = AsyncMock(side_effect=slow_upload_file)
+        out, _ = await self._run_with_assets(tmp_path, assets, upload_mock)
         elapsed = time.monotonic() - start
 
         assert out.result == "di-md"
-        # Fully serial would be (n_assets + 1 docx) * delay. Concurrent
-        # uploads plus one sequential docx upload should land near 2*delay.
-        serial_time = (n_assets + 1) * delay
+        assert out.provider_meta["artifact_id"] == "artifact-1"
+        assert "docx_url" not in out.provider_meta
+        assert upload_mock.await_count == n_assets
+        serial_time = n_assets * delay
         assert elapsed < serial_time * 0.6, (
             f"elapsed={elapsed:.3f}s not much faster than serial={serial_time:.3f}s "
             "-- asset uploads look serialized"

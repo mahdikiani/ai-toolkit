@@ -253,16 +253,38 @@ async def _emit_markdown_artifact(task: OcrTask, markdown: str) -> str | None:
     return str(artifact.uid)
 
 
+def _set_output_provider_meta(
+    provider_meta: dict,
+    *,
+    artifact_id: str | None,
+    docx_url: str | None,
+) -> None:
+    """Emit the Artifact ID and temporary mirza DOCX compatibility URL."""
+    if artifact_id:
+        provider_meta["artifact_id"] = artifact_id
+    # Remove this dual-write once Phase 4 clients use convert(artifact_id).
+    if docx_url:
+        provider_meta["docx_url"] = docx_url
+
+
 async def _upload_pipeline_assets(
     pipeline: object,
     result: str,
+    file_content: BytesIO,
+    file_type: str,
     *,
     user_id: str,
     workspace_id: str | None,
-) -> str:
-    """Upload visual assets and rewrite their markdown placeholders."""
+) -> tuple[str, str | None]:
+    """Upload assets, rewrite their placeholders, and upload a DOCX."""
+    from PIL import Image
+
     from utils.integrations.media import upload_file
 
+    from .pipeline.docx_renderer import build_docx
+    from .pipeline.renderer import render_pdf_bytes
+
+    docx_url: str | None = None
     uploaded_assets: dict[str, str] = {}
     try:
         assets = pipeline.get_assets()
@@ -281,9 +303,29 @@ async def _upload_pipeline_assets(
         if uploaded_assets:
             for asset_id, url in uploaded_assets.items():
                 result = result.replace(f"({asset_id})", f"({url})")
+
+        page_images: list[Image.Image] = []
+        if file_type == "application/pdf":
+            file_content.seek(0)
+            page_images = render_pdf_bytes(file_content, dpi=150)
+        file_content.seek(0)
+        pdf_data = file_content.read() if file_type == "application/pdf" else None
+        docx_buf = build_docx(
+            result,
+            page_images=page_images,
+            elements=pipeline.get_elements(),
+            page_headers=pipeline.get_headers(),
+            page_footers=pipeline.get_footers(),
+            crops=pipeline.get_all_crops(),
+            pdf_data=pdf_data,
+        )
+        docx_buf.seek(0)
+        docx_url = await upload_file(
+            docx_buf, user_id=user_id, workspace_id=workspace_id
+        )
     except Exception:
-        logger.exception("Pipeline asset upload failed")
-    return result
+        logger.exception("DOCX generation / asset upload failed")
+    return result, docx_url
 
 
 async def _process_with_pipeline(
@@ -334,9 +376,11 @@ async def _process_with_pipeline(
             file_content, on_page_done=on_page_done, task_uid=task.uid
         )
 
-    result = await _upload_pipeline_assets(
+    result, docx_url = await _upload_pipeline_assets(
         pipeline,
         result,
+        file_content,
+        file_type,
         user_id=task.user_id,
         workspace_id=task.workspace_id,
     )
@@ -360,8 +404,9 @@ async def _process_with_pipeline(
         "model": Settings.ocr_vlm_model,
         "usage": {"pages": page_count},
     }
-    if artifact_id:
-        provider_meta["artifact_id"] = artifact_id
+    _set_output_provider_meta(
+        provider_meta, artifact_id=artifact_id, docx_url=docx_url
+    )
 
     return await save_result(
         task,
@@ -423,6 +468,7 @@ async def _process_with_document_intelligence(
     di_pipeline.cleanup()
 
     markdown = result.markdown
+    docx_url: str | None = None
     try:
         from utils.integrations.media import upload_file
 
@@ -450,8 +496,14 @@ async def _process_with_document_intelligence(
         url_map = dict(entry for entry in uploaded if entry is not None)
         if url_map:
             markdown = rewrite_asset_links(markdown, url_map)
+
+        docx_url = await upload_file(
+            BytesIO(result.docx_bytes),
+            user_id=task.user_id,
+            workspace_id=task.workspace_id,
+        )
     except Exception:
-        logger.exception("Asset upload failed for task %s", task.uid)
+        logger.exception("Asset/DOCX upload failed for task %s", task.uid)
     finally:
         shutil.rmtree(result.output_dir, ignore_errors=True)
 
@@ -475,8 +527,9 @@ async def _process_with_document_intelligence(
             include_elements=Settings.ocr_di_output_debug,
         ),
     }
-    if artifact_id:
-        provider_meta["artifact_id"] = artifact_id
+    _set_output_provider_meta(
+        provider_meta, artifact_id=artifact_id, docx_url=docx_url
+    )
 
     return await save_result(
         task,

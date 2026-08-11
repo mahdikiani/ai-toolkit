@@ -12,9 +12,9 @@ Status: **Phase 1 through Phase 3 landed** in `ai-toolkit` `0.1.22` (`feat/artif
   - `POST /api/ai/v1/convert` — `{artifact_id, target_format}` → derived Artifact
   - `GET /api/ai/v1/convert/formats` — registered edges
 - **Compat** — `/document-convert/*` still streams DOCX/PDF for mirza; rendering now goes through converter strategy helpers.
-- **OCR producers** — pipeline and Document Intelligence OCR persist their final Markdown as an `Artifact` with `source="ocr"` and publish its UID as `provider_meta.artifact_id`. OCR still uploads and rewrites visual assets, but no longer builds, uploads, or exposes DOCX output.
+- **OCR producers** — pipeline and Document Intelligence OCR persist their final Markdown as an `Artifact` with `source="ocr"` and publish its UID as `provider_meta.artifact_id`. As temporary compatibility for mirza Word delivery, both paths also build/upload DOCX and dual-write `provider_meta.docx_url` until Phase 4 clients use `convert(artifact_id)`.
 
-Patch note (`0.1.22`): completed the Phase 3 OCR ownership migration; DOCX conversion is now owned by the Artifact converter.
+Patch note (`0.1.22`): completed the Phase 3 OCR ownership migration while temporarily retaining the legacy DOCX URL alongside the Artifact ID for mirza compatibility.
 
 ## Not in this wave
 

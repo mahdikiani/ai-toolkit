@@ -104,23 +104,38 @@ class TestOcrServicesCoverage:
             {"id": "asset:1", "image_bytes": b"img"},
             {"id": "asset:2", "image_bytes": b"bad"},
         ]
+        pipeline.get_elements.return_value = []
+        pipeline.get_headers.return_value = {}
+        pipeline.get_footers.return_value = {}
+        pipeline.get_all_crops.return_value = {}
+
         async def upload(buf, **_kwargs):
             data = buf.read() if hasattr(buf, "read") else b""
             if data == b"bad":
                 raise RuntimeError("up")
             return "https://media/x"
 
-        with patch(
-            "utils.integrations.media.upload_file", side_effect=upload
-        ) as upload_mock:
-            md = await svc._upload_pipeline_assets(
+        with (
+            patch("utils.integrations.media.upload_file", side_effect=upload),
+            patch(
+                "apps.ocr.pipeline.renderer.render_pdf_bytes",
+                return_value=[Image.new("RGB", (10, 10))],
+            ),
+            patch(
+                "apps.ocr.pipeline.docx_renderer.build_docx",
+                return_value=BytesIO(b"PK"),
+            ),
+        ):
+            md, docx_url = await svc._upload_pipeline_assets(
                 pipeline,
                 "see (asset:1)",
+                BytesIO(b"%PDF"),
+                "application/pdf",
                 user_id="u1",
                 workspace_id="w1",
             )
         assert "https://media/x" in md
-        assert upload_mock.call_count == 2
+        assert docx_url == "https://media/x"
 
         task = SimpleNamespace(
             uid="t",
@@ -165,7 +180,7 @@ class TestOcrServicesCoverage:
             ),
             patch(
                 "apps.ocr.services._upload_pipeline_assets",
-                AsyncMock(return_value="md"),
+                AsyncMock(return_value=("md", "https://media/doc.docx")),
             ),
             patch(
                 "apps.ocr.services._emit_markdown_artifact",
@@ -183,7 +198,7 @@ class TestOcrServicesCoverage:
             )
             assert out.result == "md"
             assert out.provider_meta["artifact_id"] == "artifact-1"
-            assert "docx_url" not in out.provider_meta
+            assert out.provider_meta["docx_url"] == "https://media/doc.docx"
             out = await svc._process_with_pipeline(
                 task, BytesIO(b"img"), "image/png", OcrEngineType.pipeline
             )
@@ -249,8 +264,8 @@ class TestOcrServicesCoverage:
             )
             assert "di" in out.result or out.result == "di-md"
             assert out.provider_meta["artifact_id"] == "artifact-2"
-            assert "docx_url" not in out.provider_meta
-            upload_mock.assert_awaited_once()
+            assert out.provider_meta["docx_url"] == "https://u"
+            assert upload_mock.await_count == 2
 
         di.process = AsyncMock(side_effect=RuntimeError("fail"))
         with (

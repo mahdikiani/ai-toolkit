@@ -767,9 +767,9 @@ class TestDocumentIntelligenceAssetUploadConcurrency:
 
         assert out.result == "di-md"
         assert out.provider_meta["artifact_id"] == "artifact-1"
-        assert "docx_url" not in out.provider_meta
-        assert upload_mock.await_count == n_assets
-        serial_time = n_assets * delay
+        assert out.provider_meta["docx_url"] == "https://media/ok"
+        assert upload_mock.await_count == n_assets + 1
+        serial_time = (n_assets + 1) * delay
         assert elapsed < serial_time * 0.6, (
             f"elapsed={elapsed:.3f}s not much faster than serial={serial_time:.3f}s "
             "-- asset uploads look serialized"

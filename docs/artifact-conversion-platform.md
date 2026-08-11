@@ -1,13 +1,13 @@
 # Artifact Conversion Platform
 
-Status: Phase 1–3 landed; **from-media conversion tasks** added in `0.1.23`
-(`feat/artifact-converter`).
+Status: Phase 1–4 landed on `feat/artifact-converter` / toolkit `0.1.24`.
 
 ## Layers
 
 1. **`apps/artifacts`** — durable SoR (`media:{uid}`)
 2. **`POST /convert`** — sync Artifact→Artifact (client already has `artifact_id`)
 3. **`POST /conversions/from-media`** — async task: Media URI → Artifacts → webhook
+4. **Clients (mirza)** — Convert menu uses `convert(artifact_id)` (no attachment UTF-8 decode)
 
 ## Conversion task entrypoints
 
@@ -29,10 +29,7 @@ Status: Phase 1–3 landed; **from-media conversion tasks** added in `0.1.23`
 }
 ```
 
-Also accepts Media HTTPS URLs that contain `/f/{uid}` on a Media host.
-
-Task completes with `source_artifact_id`, `result_artifact_id`, `result_storage_uri`,
-and emits webhook via TaskMixin when `webhook_url` is set.
+Also accepts Media HTTPS URLs that contain `/f/<uid>` on an allowlisted Media host.
 
 ## Other APIs
 
@@ -40,9 +37,9 @@ and emits webhook via TaskMixin when `webhook_url` is set.
 - `GET /api/ai/v1/artifacts/{uid}`
 - `POST /api/ai/v1/convert` — `{artifact_id, target_format}`
 - `GET /api/ai/v1/convert/formats`
-- `/document-convert/*` — legacy streaming compat for mirza
+- `/document-convert/*` — legacy streaming compat (same converter strategies)
 
 ## OCR
 
-Emits `provider_meta.artifact_id` and temporarily dual-writes `docx_url` until
-clients migrate to `convert(artifact_id)` / conversion tasks.
+Emits `provider_meta.artifact_id`. Temporary `docx_url` dual-write is produced via
+Converter (`markdown→docx`), not OCR-owned DOCX render/upload.

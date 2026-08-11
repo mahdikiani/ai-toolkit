@@ -160,10 +160,14 @@ async def upload_file_durable(
     )
 
 
+async def signed_url_for_storage_uri(storage_uri: str) -> str:
+    """Resolve an ephemeral signed URL for a durable ``media:{uid}`` URI."""
+    return await _fetch_signed_url(parse_media_uid(storage_uri))
+
+
 async def download_by_storage_uri(storage_uri: str) -> bytes:
     """Download file bytes for a durable ``media:{uid}`` URI."""
-    file_uid = parse_media_uid(storage_uri)
-    signed_url = await _fetch_signed_url(file_uid)
+    signed_url = await signed_url_for_storage_uri(storage_uri)
     async with httpx.AsyncClient(timeout=120) as client:
         response = await client.get(signed_url)
         response.raise_for_status()

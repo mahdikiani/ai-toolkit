@@ -117,25 +117,14 @@ class TestOcrServicesCoverage:
 
         with (
             patch("utils.integrations.media.upload_file", side_effect=upload),
-            patch(
-                "apps.ocr.pipeline.renderer.render_pdf_bytes",
-                return_value=[Image.new("RGB", (10, 10))],
-            ),
-            patch(
-                "apps.ocr.pipeline.docx_renderer.build_docx",
-                return_value=BytesIO(b"PK"),
-            ),
         ):
-            md, docx_url = await svc._upload_pipeline_assets(
+            md = await svc._upload_pipeline_assets(
                 pipeline,
                 "see (asset:1)",
-                BytesIO(b"%PDF"),
-                "application/pdf",
                 user_id="u1",
                 workspace_id="w1",
             )
         assert "https://media/x" in md
-        assert docx_url == "https://media/x"
 
         task = SimpleNamespace(
             uid="t",
@@ -180,11 +169,15 @@ class TestOcrServicesCoverage:
             ),
             patch(
                 "apps.ocr.services._upload_pipeline_assets",
-                AsyncMock(return_value=("md", "https://media/doc.docx")),
+                AsyncMock(return_value="md"),
             ),
             patch(
                 "apps.ocr.services._emit_markdown_artifact",
                 AsyncMock(return_value="artifact-1"),
+            ),
+            patch(
+                "apps.ocr.services._docx_url_via_converter",
+                AsyncMock(return_value="https://media/doc.docx"),
             ),
             patch("apps.ocr.services.finance.estimate_ocr_cost", return_value=1.0),
             patch(
@@ -249,6 +242,10 @@ class TestOcrServicesCoverage:
                 "apps.ocr.services._emit_markdown_artifact",
                 AsyncMock(return_value="artifact-2"),
             ),
+            patch(
+                "apps.ocr.services._docx_url_via_converter",
+                AsyncMock(return_value="https://media/from-converter.docx"),
+            ),
             patch("apps.ocr.services.finance.estimate_ocr_cost", return_value=1.0),
             patch(
                 "apps.ocr.services.finance.meter_cost",
@@ -264,8 +261,8 @@ class TestOcrServicesCoverage:
             )
             assert "di" in out.result or out.result == "di-md"
             assert out.provider_meta["artifact_id"] == "artifact-2"
-            assert out.provider_meta["docx_url"] == "https://u"
-            assert upload_mock.await_count == 2
+            assert out.provider_meta["docx_url"] == "https://media/from-converter.docx"
+            assert upload_mock.await_count == 1
 
         di.process = AsyncMock(side_effect=RuntimeError("fail"))
         with (

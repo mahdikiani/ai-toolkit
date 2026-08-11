@@ -262,7 +262,8 @@ def _set_output_provider_meta(
     """Emit the Artifact ID and temporary mirza DOCX compatibility URL."""
     if artifact_id:
         provider_meta["artifact_id"] = artifact_id
-    # Remove this dual-write once Phase 4 clients use convert(artifact_id).
+    # Temporary dual-write until Phase 4 clients fully use convert(artifact_id).
+    # URL comes from Converter (not OCR-owned DOCX render/upload).
     if docx_url:
         provider_meta["docx_url"] = docx_url
     logger.info(
@@ -272,27 +273,53 @@ def _set_output_provider_meta(
     )
 
 
+async def _docx_url_via_converter(
+    *,
+    artifact_id: str | None,
+    user_id: str,
+    tenant_id: str,
+    workspace_id: str | None,
+) -> str | None:
+    """
+    Derive a temporary DOCX URL via Converter from a markdown Artifact.
+
+    OCR no longer owns DOCX render/upload; Converter owns the edge.
+    """
+    if not artifact_id:
+        return None
+    try:
+        from apps.artifacts.enums import ArtifactFormat
+        from apps.converter.services import convert_artifact
+        from utils.integrations.media import signed_url_for_storage_uri
+
+        derived = await convert_artifact(
+            artifact_id=artifact_id,
+            target_format=ArtifactFormat.docx,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        )
+        return await signed_url_for_storage_uri(derived.storage_uri)
+    except Exception:
+        logger.exception(
+            "Converter DOCX dual-write failed for artifact %s", artifact_id
+        )
+        return None
+
+
 async def _upload_pipeline_assets(
     pipeline: object,
     result: str,
-    file_content: BytesIO,
-    file_type: str,
     *,
     user_id: str,
     workspace_id: str | None,
-) -> tuple[str, str | None]:
-    """Upload assets, rewrite their placeholders, and upload a DOCX."""
-    from PIL import Image
-
+) -> str:
+    """Upload figure assets and rewrite markdown placeholders (no DOCX)."""
     from utils.integrations.media import upload_file
 
-    from .pipeline.docx_renderer import build_docx
-    from .pipeline.renderer import render_pdf_bytes
-
-    docx_url: str | None = None
-    uploaded_assets: dict[str, str] = {}
     try:
         assets = pipeline.get_assets()
+        uploaded_assets: dict[str, str] = {}
         for asset in assets:
             try:
                 buf = BytesIO(asset["image_bytes"])
@@ -308,29 +335,9 @@ async def _upload_pipeline_assets(
         if uploaded_assets:
             for asset_id, url in uploaded_assets.items():
                 result = result.replace(f"({asset_id})", f"({url})")
-
-        page_images: list[Image.Image] = []
-        if file_type == "application/pdf":
-            file_content.seek(0)
-            page_images = render_pdf_bytes(file_content, dpi=150)
-        file_content.seek(0)
-        pdf_data = file_content.read() if file_type == "application/pdf" else None
-        docx_buf = build_docx(
-            result,
-            page_images=page_images,
-            elements=pipeline.get_elements(),
-            page_headers=pipeline.get_headers(),
-            page_footers=pipeline.get_footers(),
-            crops=pipeline.get_all_crops(),
-            pdf_data=pdf_data,
-        )
-        docx_buf.seek(0)
-        docx_url = await upload_file(
-            docx_buf, user_id=user_id, workspace_id=workspace_id
-        )
     except Exception:
-        logger.exception("DOCX generation / asset upload failed")
-    return result, docx_url
+        logger.exception("Pipeline asset upload failed")
+    return result
 
 
 async def _process_with_pipeline(
@@ -381,15 +388,19 @@ async def _process_with_pipeline(
             file_content, on_page_done=on_page_done, task_uid=task.uid
         )
 
-    result, docx_url = await _upload_pipeline_assets(
+    result = await _upload_pipeline_assets(
         pipeline,
         result,
-        file_content,
-        file_type,
         user_id=task.user_id,
         workspace_id=task.workspace_id,
     )
     artifact_id = await _emit_markdown_artifact(task, result)
+    docx_url = await _docx_url_via_converter(
+        artifact_id=artifact_id,
+        user_id=task.user_id,
+        tenant_id=task.tenant_id,
+        workspace_id=task.workspace_id,
+    )
 
     amount = finance.estimate_ocr_cost(pages=page_count, engine=engine.value)
     usage = await _meter_usage(
@@ -473,7 +484,6 @@ async def _process_with_document_intelligence(
     di_pipeline.cleanup()
 
     markdown = result.markdown
-    docx_url: str | None = None
     try:
         from utils.integrations.media import upload_file
 
@@ -501,18 +511,18 @@ async def _process_with_document_intelligence(
         url_map = dict(entry for entry in uploaded if entry is not None)
         if url_map:
             markdown = rewrite_asset_links(markdown, url_map)
-
-        docx_url = await upload_file(
-            BytesIO(result.docx_bytes),
-            user_id=task.user_id,
-            workspace_id=task.workspace_id,
-        )
     except Exception:
-        logger.exception("Asset/DOCX upload failed for task %s", task.uid)
+        logger.exception("Asset upload failed for task %s", task.uid)
     finally:
         shutil.rmtree(result.output_dir, ignore_errors=True)
 
     artifact_id = await _emit_markdown_artifact(task, markdown)
+    docx_url = await _docx_url_via_converter(
+        artifact_id=artifact_id,
+        user_id=task.user_id,
+        tenant_id=task.tenant_id,
+        workspace_id=task.workspace_id,
+    )
 
     amount = finance.estimate_ocr_cost(pages=page_count, engine=engine.value)
     usage = await _meter_usage(

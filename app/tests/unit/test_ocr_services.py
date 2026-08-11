@@ -721,6 +721,10 @@ class TestDocumentIntelligenceAssetUploadConcurrency:
                 "apps.ocr.services._emit_markdown_artifact",
                 AsyncMock(return_value="artifact-1"),
             ),
+            patch(
+                "apps.ocr.services._docx_url_via_converter",
+                AsyncMock(return_value="https://media/from-converter.docx"),
+            ),
             patch("apps.ocr.services.checkpoint_store.clear", AsyncMock()),
             patch("apps.ocr.services.finance.estimate_ocr_cost", return_value=1.0),
             patch(
@@ -767,9 +771,9 @@ class TestDocumentIntelligenceAssetUploadConcurrency:
 
         assert out.result == "di-md"
         assert out.provider_meta["artifact_id"] == "artifact-1"
-        assert out.provider_meta["docx_url"] == "https://media/ok"
-        assert upload_mock.await_count == n_assets + 1
-        serial_time = (n_assets + 1) * delay
+        assert out.provider_meta["docx_url"] == "https://media/from-converter.docx"
+        assert upload_mock.await_count == n_assets
+        serial_time = n_assets * delay
         assert elapsed < serial_time * 0.6, (
             f"elapsed={elapsed:.3f}s not much faster than serial={serial_time:.3f}s "
             "-- asset uploads look serialized"

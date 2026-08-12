@@ -1,7 +1,8 @@
 # Artifact Conversion Platform
 
-Status: verified on toolkit `0.1.24` (`feat/artifact-converter`); merging to
-toolkit `main`. PDF engine this wave: WeasyPrint. Typst remains out of scope.
+Status: `[x]` — merged to toolkit `main` @ `7456862` / deployed `0.1.24`.
+Convert Word/PDF verified (`convert.manual_verify` + downloadable bytes).
+PDF engine this wave: WeasyPrint. Typst remains out of scope.
 
 See also: workspace `AI-BOT-CONVERT-TASK.md` and
 `AI-BOT-IMPLEMENTATION-PLAN.md`.
@@ -13,12 +14,11 @@ See also: workspace `AI-BOT-CONVERT-TASK.md` and
 3. **`POST /conversions/from-media`** — async Media URI → Artifacts → webhook
 4. **mirza Convert** — prefers `convert(artifact_id)` when metadata has it
 
-## Close criteria
+## Closed
 
-1. Merge `feat/artifact-converter` into toolkit `main`
-2. Manual/API verify: create markdown Artifact → Convert → Word and PDF
-   (confirmed via `convert.manual_verify` logs + downloadable `PK`/`%PDF-` bytes)
-3. Mark plan phase 6 / queue C `[x]`
+1. Merged `feat/artifact-converter` into toolkit `main`
+2. Verified: markdown Artifact → Convert → Word and PDF
+3. Plan phase 6 / item C marked `[x]`
 
 ## Non-goals this wave
 
